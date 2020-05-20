@@ -1,0 +1,6 @@
+**/*~
+compiled/
+*.o
+*.s
+*.run
+program.rkt
