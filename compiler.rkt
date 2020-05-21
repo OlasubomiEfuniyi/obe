@@ -12,13 +12,14 @@
 type Expr =
 | integer
 |`(bignum ,integer)
+|`(add ,integer ,integer)
+|`(add-bn ,bignum ,bignum)
 |#
 
 ;;Entry compile function
 ;;Expr -> ASM
 (define (compile expr)
-  `(
-    ,@(compile-e expr)
+  `(,@(compile-e expr)
     ret))
 
 ;;The toplevel compile function from which the compilation of an expression begins
@@ -27,6 +28,8 @@ type Expr =
   (match expr
     [(? integer? expr) (compile-integer expr)]
     [`(bignum ,num) (compile-bignum num)]
+    [`(add ,e1 ,e2) (compile-add e1 e2)]
+    ;;[`(add-bn ,e1 ,e2) (compile-add-bn e1 e2)]
     [_ (error "Invalid Program")]))
 
 ;;Compile an integer into assembly, placing the value in rax
@@ -62,6 +65,18 @@ type Expr =
       ;;Tag the result as a bignum
       (or rax ,type-bignum))))
 
+(define (compile-add e1 e2)
+  (let ((c1 (compile-e e1))
+        (c2 (compile-e e2)))
+    `(,@c1
+      (mov rbx rax) ;;Save the result of evaluating the first expression in rbx
+      ,@c2
+      ;;Add the result of evaluating the first expression to the result
+      ;;of evaluating the second expression
+      (add rax rbx))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Helper Functions;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Compile a list of characters by placing each of them on the heap one byte at a time
 ;;No result is returned in rax.
 ;;listof(characters) -> ASM
