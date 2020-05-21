@@ -2,8 +2,12 @@
 #|
 
 type ASM =
+|Arithmetic
 |Transfer
 |ControlFlow
+
+type Access =
+| '(offset Register ,integer)
 
 type Transfer =
 |'(mov Arg Arg)
@@ -14,12 +18,14 @@ type ControlFlow =
 type Arg =
 | Value
 | Register
+||Access
 
 type Value =
 | integer
 
 type Register
 | rax
+|rdi
 
 |#
 
@@ -42,6 +48,7 @@ type Register
   (match asm
     [(? transfer? asm) (transfer->assembly asm)]
     [(? control-flow? asm) (control-flow->assembly asm)]
+    [(? arithmetic? asm) (arithmetic->assembly asm)]
     [_ (error "Unrecognized ASM")]))
 
 
@@ -57,6 +64,13 @@ type Register
     ['ret (symbol->string 'ret)]
     [_ (error "Unsupported control flow")]))
 
+;;Convert a arithmetic instruction to executable assembly
+;;ASM -> string
+(define (arithmetic->assembly asm)
+  (match asm
+    [`(add ,arg1 ,arg2) (string-append "add " (arg->string arg1) ", " (arg->string arg2))]
+    [`(or ,arg1 ,arg2) (string-append "or " (arg->string arg1) ", " (arg->string arg2))]
+    [_ (error "Unsopported arithmetic operation")]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;String conversion funcitons;;;;;;;;;;;;;;;;;;;;;;;
 ;;Convert an Arg to a string
@@ -65,6 +79,7 @@ type Register
   (match arg
     [(? value? arg) (value->string arg)]
     [(? register? arg) (register->string arg)]
+    [`(offset ,reg ,v) (string-append "[" (register->string reg) " + " (number->string (* 8 v)) "]")]
     [_ (error "Invalid Arg")]))
 
 ;;Covnvert a Value to a string
@@ -103,8 +118,17 @@ type Register
 ;;Determine if the argument is a Register
 ;;Symbol -> boolean
 (define (register? r)
-  (equal? r 'rax))
+  (match r
+    [(or 'rax 'rdi 'rbx) #t]
+    [_ #f]))
 
+;;Determine if the argument is an arithmetic instruction
+;;ASM -> string
+(define (arithmetic? asm)
+  (match asm
+    [`(add ,a ,b) #t]
+    [`(or ,a ,b) #t]
+    [_ #f]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Tests;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (module+ test

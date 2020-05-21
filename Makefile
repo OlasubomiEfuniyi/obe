@@ -13,9 +13,10 @@
 %.o: %.s
 	nasm -f elf64 -o $@ $<
 
-# Use gcc to link the program's .o file with the runtime system
+# Use gcc to link the program's .o file with the runtime system. -lgmp is for 
+# the gmp library
 %.run: %.o runtime.o
-	gcc runtime.o $< -o $@
+	gcc runtime.o $< -o $@ -lgmp
 
 # Use gcc to creat a linkable object format of the runtime system
 runtime.o: runtime.c
