@@ -30,7 +30,7 @@ type Expr =
     [`(bignum ,num) (compile-bignum num)]
     [`(add ,e1 ,e2) (compile-add e1 e2)]
     ;;[`(add-bn ,e1 ,e2) (compile-add-bn e1 e2)]
-    [_ (let () (display expr) (error "Invalid Program"))]))
+    [_ (error "Invalid Program")]))
 
 ;;Compile an integer into assembly, placing the value in rax
 ;;Expr -> ASM
