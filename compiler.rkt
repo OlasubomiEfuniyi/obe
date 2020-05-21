@@ -1,6 +1,7 @@
 #lang racket
 
 (provide compile)
+(require "program-executor.rkt")
 (module+ test
   (require rackunit))
 
@@ -48,8 +49,10 @@ type Expr =
          (num-string (number->string num))
          (len (+ (string-length num-string) 1)) ;;The number of bytes of characters to be used since each character is one byte
          (mod (modulo len 8))
-         (padding (build-string (if (zero? mod) 0 (- 8 mod)) (λ (i) #\0)))
-         (num-string-padded (string-append padding num-string))
+         (padding (build-string (if (zero? mod) 0 (- 8 mod)) (λ (i) (integer->char 0))))
+         ;;Pad the string representation of the number with enough null characters to keep the
+         ;;heap at a 64 bit boundry
+         (num-string-padded (string-append num-string padding))
          ;;Using the padded num-string ensures that rdi remains at an 8 byte boundary
          (num-list (string->list num-string-padded)))
     `(
@@ -95,8 +98,8 @@ type Expr =
 
 ;;;;;;;;;;;;;;;;;;;;Tests;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (module+ test
-  (check-equal? (compile 5) `((mov rax ,(* 2 5)) ret))
-  (check-equal? (compile 9223372036854775807) `((mov rax ,(* 2 9223372036854775807)) ret))
-  (check-equal? (compile -5) `((mov rax ,(* 2 -5)) ret))
-  (check-equal? (compile -9223372036854775807) `((mov rax ,(* 2 -9223372036854775807)) ret)))
+  (check-equal? (execute 5) 5)
+  (check-equal? (execute `(bignum 9223372036854775807)) 9223372036854775807)
+  (check-equal? (execute -5) -5)
+  (check-equal? (execute `(bignum -9223372036854775807)) -9223372036854775807))
     
