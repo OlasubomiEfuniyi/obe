@@ -5,6 +5,21 @@ type ASM =
 |Arithmetic
 |Transfer
 |ControlFlow
+|Comparison
+|Symbol
+|StackOperation
+
+
+type StackOperation =
+|'push
+
+type Arithmetic =
+|'(add Arg Arg)
+|'(or Arg Arg)
+|'(and Arg Arg)
+
+type Comparison =
+|'cmp
 
 type Access =
 | '(offset Register ,integer)
@@ -14,6 +29,7 @@ type Transfer =
 
 type ControlFlow =
 |'ret
+|'jne
 
 type Arg =
 | Value
@@ -49,10 +65,21 @@ type Register
     [(? transfer? asm) (transfer->assembly asm)]
     [(? control-flow? asm) (control-flow->assembly asm)]
     [(? arithmetic? asm) (arithmetic->assembly asm)]
-    [_ (error "Unrecognized ASM")]))
+    [(? comparison? asm) (comparison->assembly asm)]
+    [(? symbol? asm) (string-append (symbol->string asm) ":")]
+    [(? stack-operation? asm) (stack-operation->assembly asm)]
+    [_ (let () (display asm) (error "Unrecognized ASM"))]))
 
+
+;;Convert stack operation instruction to assembly
+;;ASM -> string
+(define (stack-operation->assembly asm)
+  (match asm
+    [`(push ,arg) (string-append "push " (arg->string arg))]
+    [_ (error "Unsupported stack-operation")]))
 
 ;;Convert transfer instruction to executable assembly
+;;ASM -> string
 (define (transfer->assembly asm)
   (match asm
     [(list op arg1 arg2) (string-append (symbol->string op) " " (arg->string arg1) ", " (arg->string arg2))]
@@ -61,8 +88,16 @@ type Register
 ;:Convert a control flow instruction to executable assembly
 (define (control-flow->assembly cf)
   (match cf
-    ['ret (symbol->string 'ret)]
+    ['ret "ret"]
+    [`(jne ,lab) (string-append "jne " (symbol->string lab))]
+    [`(call ,lab) (string-append "call " (symbol->string lab))]
     [_ (error "Unsupported control flow")]))
+
+;;Convert a comparison instruction to executable assembly
+(define (comparison->assembly asm)
+  (match asm
+    [`(cmp ,arg1 ,arg2) (string-append "cmp " (arg->string arg1) ", " (arg->string arg2))]
+    [_ (error "Unsupported comparison instruction")]))
 
 ;;Convert a arithmetic instruction to executable assembly
 ;;ASM -> string
@@ -70,6 +105,7 @@ type Register
   (match asm
     [`(add ,arg1 ,arg2) (string-append "add " (arg->string arg1) ", " (arg->string arg2))]
     [`(or ,arg1 ,arg2) (string-append "or " (arg->string arg1) ", " (arg->string arg2))]
+    [`(and ,arg1 ,arg2) (string-append "and " (arg->string arg1) ", " (arg->string arg2))]
     [_ (error "Unsopported arithmetic operation")]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;String conversion funcitons;;;;;;;;;;;;;;;;;;;;;;;
@@ -94,7 +130,6 @@ type Register
   (symbol->string r))
 
 
-
 ;;;;;;;;;;;;;;;;;;;; Predicates;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;;Determine if an ASM representation is a transfer instruction
@@ -108,6 +143,7 @@ type Register
 (define (control-flow? asm)
   (match asm
     ['ret #t]
+    [(list (or 'jne 'call) lab) #t]
     [_ #f]))
 
 ;;Determine if the argument is  a Value
@@ -119,7 +155,7 @@ type Register
 ;;Symbol -> boolean
 (define (register? r)
   (match r
-    [(or 'rax 'rdi 'rbx) #t]
+    [(or 'rax 'rdi 'rbx 'rsp 'rbp) #t]
     [_ #f]))
 
 ;;Determine if the argument is an arithmetic instruction
@@ -128,11 +164,27 @@ type Register
   (match asm
     [`(add ,a ,b) #t]
     [`(or ,a ,b) #t]
+    [`(and ,a ,b) #t]
     [_ #f]))
+
+;;Determine if the argument is a comparison instruction
+;;ASM -> string
+(define (comparison? asm)
+  (match asm
+    [`(cmp ,a ,b) #t]
+    [_ #f]))
+
+;;Determine if the argument is a stack operation
+;;ASM -> boolean
+(define (stack-operation? asm)
+  (match asm
+    [`(push ,arg) #t]
+    [_ #f]))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Tests;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (module+ test
-  (check-equal? (asm->assembly '(mov rax 9223372036854775807)) "mov rax, 9223372036854775807")
-  (check-equal? (asm->assembly '(mov rax 5)) "mov rax, 5")
-  (check-equal? (asm->assembly '(mov rax -9223372036854775807)) "mov rax, -9223372036854775807")
-  (check-equal? (asm->assembly '(mov rax -5)) "mov rax, -5"))
+  (check-equal? (asm->assembly '((mov rax 9223372036854775807))) "\tmov rax, 9223372036854775807\n")
+  (check-equal? (asm->assembly '((mov rax 5))) "\tmov rax, 5\n")
+  (check-equal? (asm->assembly '((mov rax -9223372036854775807))) "\tmov rax, -9223372036854775807\n")
+  (check-equal? (asm->assembly '((mov rax -5))) "\tmov rax, -5\n"))

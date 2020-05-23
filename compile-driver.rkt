@@ -11,6 +11,6 @@
         (display (complete-assembly-file (asm->assembly (compile program))))))))
 
 (define (complete-assembly-file prog)
-  (string-append "\t global entry\n" "\t section .text\n" "entry: \n" prog))
+  (string-append "\tglobal entry\n" "\textern error\n" "\tsection .text\n" "entry: \n" prog))
 
 

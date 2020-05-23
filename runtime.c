@@ -22,7 +22,7 @@ int main(int argc, char** argv) {
 
 	if(heap == NULL) {
 		fprintf(stderr, "could not allocate heap space");
-		exit(-1);
+		exit(1);
 	}
 
 	/* Entry may either return a 64 bit value via a register or a pointer to a result */
@@ -54,4 +54,10 @@ int main(int argc, char** argv) {
 
 	free(heap);
 	return 0;
+}
+
+/* Signal an error while executing the program */
+int error() {
+	printf("err\n");
+	exit(0); //The program being executed errored out, but the runtime system did not
 }

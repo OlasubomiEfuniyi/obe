@@ -21,6 +21,10 @@ type Expr =
 ;;Expr -> ASM
 (define (compile expr)
   `(,@(compile-e expr)
+    ret
+    err
+    (push rbp)
+    (call error)
     ret))
 
 ;;The toplevel compile function from which the compilation of an expression begins
@@ -72,13 +76,21 @@ type Expr =
   (let ((c1 (compile-e e1))
         (c2 (compile-e e2)))
     `(,@c1
-      (mov rbx rax) ;;Save the result of evaluating the first expression in rbx
+      ,@assert-integer
+      (mov (offset rsp 1) rax) ;;Save the result of evaluating the first expression on the stack
       ,@c2
+      ,@assert-integer
       ;;Add the result of evaluating the first expression to the result
       ;;of evaluating the second expression
-      (add rax rbx))))
+      (add rax (offset rsp 1)))))
 
 
+(define assert-integer
+  `(
+    (mov rbx rax)
+    (and rbx ,type-mask)
+    (cmp rbx ,type-integer)
+    (jne err)))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Helper Functions;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Compile a list of characters by placing each of them on the heap one byte at a time
 ;;No result is returned in rax.
@@ -98,8 +110,18 @@ type Expr =
 
 ;;;;;;;;;;;;;;;;;;;;Tests;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (module+ test
+  ;;Test integers
   (check-equal? (execute 5) 5)
-  (check-equal? (execute `(bignum 9223372036854775807)) 9223372036854775807)
   (check-equal? (execute -5) -5)
-  (check-equal? (execute `(bignum -9223372036854775807)) -9223372036854775807))
+  
+  ;;Test bignum
+  (check-equal? (execute `(bignum 9223372036854775807)) 9223372036854775807)
+  (check-equal? (execute `(bignum -9223372036854775807)) -9223372036854775807)
+  
+  ;;Test add
+  (check-equal? (execute `(add 5 8)) 13)
+  (check-equal? (execute `(add 4611686018427387902 1)) 4611686018427387903)
+  (check-equal? (execute `(add (bignum 1) 5)) 'err)
+  (check-equal? (execute `(add 5 (bignum 1))) 'err)
+  (check-equal? (execute `(add (bignum 1) (bignum 6))) 'err))
     
