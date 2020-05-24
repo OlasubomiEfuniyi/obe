@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <gmp.h>
 #include <assert.h>
-
+#include <string.h>
 
 #define result_mask 1
 #define result_shift 1
@@ -12,6 +12,7 @@
 #define heap_size 10000000
 
 int64_t entry(void* heap);
+void printBignum(int64_t value);
 
 /* From this method, the compiled program is initiated by calling the entry function in assembly.
 The entry function is linked with this RTS 
@@ -27,33 +28,80 @@ int main(int argc, char** argv) {
 
 	/* Entry may either return a 64 bit value via a register or a pointer to a result */
 	int64_t  value = entry(heap);
-	int flag; //To hold the result of parsing the return value as a base 10 number.
-	mpz_t result;
-
+	
 	switch(value & result_mask) {
 	case type_integer:
 		printf("%" PRId64 "\n", value >> result_shift);
 		break;
 	case type_bignum:		
-		/* Initialize thei number */
-		mpz_init(result);
-		mpz_set_ui(result, 0);
-
-		//Clear the tagging to get the address
-		value = (value ^ type_bignum);
-
-		//Parse the value as a base 10 number, reading it directly from the heap
-		//from the beginning of the string to the null character
-		flag = mpz_set_str(result, ((char*) value), 10);
-		assert(flag == 0); //If the flag is not 0, then the operation failed 	
-		mpz_out_str(stdout,10,result);
-		printf("\n");
+		printBignum(value);	
 		break;
 	} 
 	
 
 	free(heap);
 	return 0;
+}
+
+/* Add two big nums and return the length of the result string  */
+int64_t  addBignum(int64_t arg0, int64_t  arg1, int64_t arg2) {
+	int flag; //To hold the result of parsing the return value as a base 10 number.
+	mpz_t result1;
+	mpz_t result2;
+	mpz_t addition_result;
+
+	/* Initialize the number */
+	mpz_init(result1);
+	mpz_init(result2);
+	mpz_init(addition_result);
+
+	mpz_set_ui(addition_result, 0);
+	mpz_set_ui(result1, 0);
+	mpz_set_ui(result2, 0);
+
+	//Clear the tagging to get the address. The location where the result will be placed is untagged
+	arg1 = (arg1 ^ type_bignum);
+	arg2 = (arg2 ^ type_bignum);
+
+	//Parse the value as a base 10 number, reading it directly from the heap
+	//from the beginning of the string to the null character
+	flag = mpz_set_str(result1, ((char*) arg1), 10);
+	assert(flag == 0); //If the flag is not 0, then the operation failed
+
+	flag = mpz_set_str(result2, ((char*) arg2), 10);
+	assert(flag == 0); //If the flag is not 0, then the operation failed  
+	
+	//Perform addition
+	mpz_add(addition_result, result1, result2);
+
+	//Get the string representation of the result on the heap, as this is how bignums are stored in obe
+	char* res_str = mpz_get_str(((char *) arg0), 10, addition_result);
+	
+	int64_t len =  strlen(res_str) + 1; //Include the null char
+	int64_t padding = ((len % 8) == 0) ? 0 : (8 - (len % 8));
+
+	return (len + padding);
+}
+
+/* Given a pointer to a bignum string on the heap, print the value of the bignum */
+void printBignum(int64_t value) {
+	int flag; //To hold the result of parsing the return value as a base 10 number.
+	mpz_t result;
+
+	/* Initialize thei number */
+	mpz_init(result);
+	mpz_set_ui(result, 0);
+
+	//Clear the tagging to get the address
+	value = (value ^ type_bignum);
+
+	//printf("%s\n", ((char*) value));
+	//Parse the value as a base 10 number, reading it directly from the heap
+	//from the beginning of the string to the null character
+	flag = mpz_set_str(result, ((char*) value), 10);
+	assert(flag == 0); //If the flag is not 0, then the operation failed 	
+	mpz_out_str(stdout,10,result);
+	printf("\n");
 }
 
 /* Signal an error while executing the program */

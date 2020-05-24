@@ -12,11 +12,14 @@ type ASM =
 
 type StackOperation =
 |'push
+|pop
 
 type Arithmetic =
 |'(add Arg Arg)
+|'(sub Arg Arg)
 |'(or Arg Arg)
 |'(and Arg Arg)
+|'(xor Arg Arg)
 
 type Comparison =
 |'cmp
@@ -40,8 +43,15 @@ type Value =
 | integer
 
 type Register
-| rax
-|rdi
+|'rax
+|'rdi
+|'rsp
+|'rbp
+|'rsi
+|'rbx
+|'r15
+|'rdx
+|'r14
 
 |#
 
@@ -68,7 +78,7 @@ type Register
     [(? comparison? asm) (comparison->assembly asm)]
     [(? symbol? asm) (string-append (symbol->string asm) ":")]
     [(? stack-operation? asm) (stack-operation->assembly asm)]
-    [_ (let () (display asm) (error "Unrecognized ASM"))]))
+    [_ (let () (error (string-append (symbol->string (car asm)) "Unrecognized ASM")))]))
 
 
 ;;Convert stack operation instruction to assembly
@@ -76,6 +86,7 @@ type Register
 (define (stack-operation->assembly asm)
   (match asm
     [`(push ,arg) (string-append "push " (arg->string arg))]
+    [`(pop ,arg) (string-append "pop " (arg->string arg))]
     [_ (error "Unsupported stack-operation")]))
 
 ;;Convert transfer instruction to executable assembly
@@ -104,8 +115,10 @@ type Register
 (define (arithmetic->assembly asm)
   (match asm
     [`(add ,arg1 ,arg2) (string-append "add " (arg->string arg1) ", " (arg->string arg2))]
+    [`(sub ,arg1 ,arg2) (string-append "sub " (arg->string arg1) ", " (arg->string arg2))]
     [`(or ,arg1 ,arg2) (string-append "or " (arg->string arg1) ", " (arg->string arg2))]
     [`(and ,arg1 ,arg2) (string-append "and " (arg->string arg1) ", " (arg->string arg2))]
+    [`(xor ,arg1 ,arg2) (string-append "xor " (arg->string arg1) ", " (arg->string arg2))]
     [_ (error "Unsopported arithmetic operation")]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;String conversion funcitons;;;;;;;;;;;;;;;;;;;;;;;
@@ -115,8 +128,8 @@ type Register
   (match arg
     [(? value? arg) (value->string arg)]
     [(? register? arg) (register->string arg)]
-    [`(offset ,reg ,v) (string-append "[" (register->string reg) " + " (number->string (* 8 v)) "]")]
-    [_ (error "Invalid Arg")]))
+    [`(offset ,arg ,v) (string-append "[" (arg->string arg) " + " (number->string (* 8 v)) "]")]
+    [_ (error "Invalid Arg: " (string-append (symbol->string arg)))]))
 
 ;;Covnvert a Value to a string
 ;;Value -> string
@@ -155,7 +168,7 @@ type Register
 ;;Symbol -> boolean
 (define (register? r)
   (match r
-    [(or 'rax 'rdi 'rbx 'rsp 'rbp) #t]
+    [(or 'rax 'rdi 'rsi 'rbx 'rdx 'rsp 'rbp 'r15 'r14) #t]
     [_ #f]))
 
 ;;Determine if the argument is an arithmetic instruction
@@ -163,8 +176,10 @@ type Register
 (define (arithmetic? asm)
   (match asm
     [`(add ,a ,b) #t]
+    [`(sub ,a ,b) #t]
     [`(or ,a ,b) #t]
     [`(and ,a ,b) #t]
+    [`(xor ,a ,b) #t]
     [_ #f]))
 
 ;;Determine if the argument is a comparison instruction
@@ -179,6 +194,7 @@ type Register
 (define (stack-operation? asm)
   (match asm
     [`(push ,arg) #t]
+    [`(pop ,arg) #t]
     [_ #f]))
 
 
