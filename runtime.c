@@ -13,6 +13,7 @@
 
 int64_t entry(void* heap);
 void printBignum(int64_t value);
+int error(void);
 
 /* From this method, the compiled program is initiated by calling the entry function in assembly.
 The entry function is linked with this RTS 
@@ -49,30 +50,72 @@ int64_t  addBignum(int64_t arg0, int64_t  arg1, int64_t arg2) {
 	mpz_t result1;
 	mpz_t result2;
 	mpz_t addition_result;
-
-	/* Initialize the number */
-	mpz_init(result1);
-	mpz_init(result2);
-	mpz_init(addition_result);
-
-	mpz_set_ui(addition_result, 0);
-	mpz_set_ui(result1, 0);
-	mpz_set_ui(result2, 0);
-
-	//Clear the tagging to get the address. The location where the result will be placed is untagged
-	arg1 = (arg1 ^ type_bignum);
-	arg2 = (arg2 ^ type_bignum);
-
-	//Parse the value as a base 10 number, reading it directly from the heap
-	//from the beginning of the string to the null character
-	flag = mpz_set_str(result1, ((char*) arg1), 10);
-	assert(flag == 0); //If the flag is not 0, then the operation failed
-
-	flag = mpz_set_str(result2, ((char*) arg2), 10);
-	assert(flag == 0); //If the flag is not 0, then the operation failed  
 	
-	//Perform addition
-	mpz_add(addition_result, result1, result2);
+
+	if(((arg1 & result_mask) == type_bignum) && ((arg2 & result_mask) == type_bignum)) { //We are addign two bignums
+		/* Initialize the number */
+		mpz_init(result1);
+		mpz_init(addition_result);
+
+		mpz_set_ui(addition_result, 0);
+		mpz_set_ui(result1, 0);
+
+		arg1 = (arg1 ^ type_bignum);
+
+		//Parse the value as a base 10 number, reading it directly from the heap
+		//from the beginning of the string to the null character
+		flag = mpz_set_str(result1, ((char*) arg1), 10);
+		assert(flag == 0); //If the flag is not 0, then the operation failed
+
+		
+		mpz_init(result2);
+		mpz_set_ui(result2, 0);
+
+		//Clear the tagging to get the address. The location where the result will be placed is untagged
+		arg2 = (arg2 ^ type_bignum);
+
+		flag = mpz_set_str(result2, ((char*) arg2), 10);
+		assert(flag == 0); //If the flag is not 0, then the operation failed  
+		
+		//Perform addition
+		mpz_add(addition_result, result1, result2);
+	} else if (((arg1 & result_mask) == type_bignum) && ((arg2 & result_mask) == type_integer)) { //We are adding an integer to a bignum
+		/* Initialize the number */
+		mpz_init(result1);
+		mpz_init(addition_result);
+
+		mpz_set_ui(addition_result, 0);
+		mpz_set_ui(result1, 0);
+
+		arg1 = (arg1 ^ type_bignum);
+
+		//Parse the value as a base 10 number, reading it directly from the heap
+		//from the beginning of the string to the null character
+		flag = mpz_set_str(result1, ((char*) arg1), 10);
+		assert(flag == 0); //If the flag is not 0, then the operation failed
+
+
+		mpz_add_ui(addition_result, result1, (arg2 >> result_shift));
+	} else if (((arg1 & result_mask) == type_integer) && ((arg2 & result_mask) == type_bignum)) { //We are adding an integer to a bignum
+		/* Initialize the number */
+		mpz_init(result2);
+		mpz_init(addition_result);
+
+		mpz_set_ui(addition_result, 0);
+		mpz_set_ui(result2, 0);
+
+		arg2 = (arg2 ^ type_bignum);
+
+		//Parse the value as a base 10 number, reading it directly from the heap
+		//from the beginning of the string to the null character
+		flag = mpz_set_str(result2, ((char*) arg2), 10);
+		assert(flag == 0); //If the flag is not 0, then the operation failed
+
+
+		mpz_add_ui(addition_result, result2, (arg1 >> result_shift));
+	} else {
+		error();
+	}
 
 	//Get the string representation of the result on the heap, as this is how bignums are stored in obe
 	char* res_str = mpz_get_str(((char *) arg0), 10, addition_result);
@@ -83,36 +126,78 @@ int64_t  addBignum(int64_t arg0, int64_t  arg1, int64_t arg2) {
 	return (len + padding);
 }
 
-/* Add two big nums and return the length of the result string */
+/* Add two big nums and return the length of the result string  */
 int64_t  subBignum(int64_t arg0, int64_t  arg1, int64_t arg2) {
 	int flag; //To hold the result of parsing the return value as a base 10 number.
 	mpz_t result1;
 	mpz_t result2;
 	mpz_t addition_result;
-
-	/* Initialize the number */
-	mpz_init(result1);
-	mpz_init(result2);
-	mpz_init(addition_result);
-
-	mpz_set_ui(addition_result, 0);
-	mpz_set_ui(result1, 0);
-	mpz_set_ui(result2, 0);
-
-	//Clear the tagging to get the address. The location where the result will be placed is untagged
-	arg1 = (arg1 ^ type_bignum);
-	arg2 = (arg2 ^ type_bignum);
-
-	//Parse the value as a base 10 number, reading it directly from the heap
-	//from the beginning of the string to the null character
-	flag = mpz_set_str(result1, ((char*) arg1), 10);
-	assert(flag == 0); //If the flag is not 0, then the operation failed
-
-	flag = mpz_set_str(result2, ((char*) arg2), 10);
-	assert(flag == 0); //If the flag is not 0, then the operation failed  
 	
-	//Perform addition
-	mpz_sub(addition_result, result1, result2);
+
+	if(((arg1 & result_mask) == type_bignum) && ((arg2 & result_mask) == type_bignum)) { //We are addign two bignums
+		/* Initialize the number */
+		mpz_init(result1);
+		mpz_init(addition_result);
+
+		mpz_set_ui(addition_result, 0);
+		mpz_set_ui(result1, 0);
+
+		arg1 = (arg1 ^ type_bignum);
+
+		//Parse the value as a base 10 number, reading it directly from the heap
+		//from the beginning of the string to the null character
+		flag = mpz_set_str(result1, ((char*) arg1), 10);
+		assert(flag == 0); //If the flag is not 0, then the operation failed
+
+		
+		mpz_init(result2);
+		mpz_set_ui(result2, 0);
+
+		//Clear the tagging to get the address. The location where the result will be placed is untagged
+		arg2 = (arg2 ^ type_bignum);
+
+		flag = mpz_set_str(result2, ((char*) arg2), 10);
+		assert(flag == 0); //If the flag is not 0, then the operation failed  
+		
+		//Perform addition
+		mpz_sub(addition_result, result1, result2);
+	} else if (((arg1 & result_mask) == type_bignum) && ((arg2 & result_mask) == type_integer)) { //We are adding an integer to a bignum
+		/* Initialize the number */
+		mpz_init(result1);
+		mpz_init(addition_result);
+
+		mpz_set_ui(addition_result, 0);
+		mpz_set_ui(result1, 0);
+
+		arg1 = (arg1 ^ type_bignum);
+
+		//Parse the value as a base 10 number, reading it directly from the heap
+		//from the beginning of the string to the null character
+		flag = mpz_set_str(result1, ((char*) arg1), 10);
+		assert(flag == 0); //If the flag is not 0, then the operation failed
+
+
+		mpz_sub_ui(addition_result, result1, (arg2 >> result_shift));
+	} else if (((arg1 & result_mask) == type_integer) && ((arg2 & result_mask) == type_bignum)) { //We are adding an integer to a bignum
+		/* Initialize the number */
+		mpz_init(result2);
+		mpz_init(addition_result);
+
+		mpz_set_ui(addition_result, 0);
+		mpz_set_ui(result2, 0);
+
+		arg2 = (arg2 ^ type_bignum);
+
+		//Parse the value as a base 10 number, reading it directly from the heap
+		//from the beginning of the string to the null character
+		flag = mpz_set_str(result2, ((char*) arg2), 10);
+		assert(flag == 0); //If the flag is not 0, then the operation failed
+
+
+		mpz_sub_ui(addition_result, result2, (arg1 >> result_shift));
+	} else {
+		error();
+	}
 
 	//Get the string representation of the result on the heap, as this is how bignums are stored in obe
 	char* res_str = mpz_get_str(((char *) arg0), 10, addition_result);

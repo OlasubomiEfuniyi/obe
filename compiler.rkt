@@ -171,11 +171,9 @@ type Expr =
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env))))
     `(,@c1
-      ,@assert-bignum
       (mov (offset rsp ,(- (add1 (length env)))) rax) ;;Save the result of evaluating the first expression on the stack to prevent clobbering
       
       ,@c2
-      ,@assert-bignum
       
       ;;Save the stack
       (mov r15 rsp) ;;The function being called will take care of setting and restoring rbp
@@ -227,11 +225,9 @@ type Expr =
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env))))
     `(,@c1
-      ,@assert-bignum
       (mov (offset rsp ,(- (add1 (length env)))) rax) ;;Save the result of evaluating the first expression on the stack to prevent clobbering
       
       ,@c2
-      ,@assert-bignum
       
       ;;Save the stack
       (mov r15 rsp) ;;The function being called will take care of setting and restoring rbp
@@ -341,8 +337,9 @@ type Expr =
   ;;Test add-bn
   (check-equal? (execute `(add-bn (bignum 2) (bignum 3))) 5)
   (check-equal? (execute `(add-bn (bignum 9223372036854775807) (bignum 9223372036854775807))) 18446744073709551614)
-  (check-equal? (execute `(add-bn 1 (bignum 1))) 'err)
-  (check-equal? (execute `(add-bn (bignum 2) 9)) 'err)
+  (check-equal? (execute `(add-bn 1 (bignum 1))) 2)
+  (check-equal? (execute `(add-bn 10 (bignum 1))) 11)
+  (check-equal? (execute `(add-bn (bignum 2) 9)) 11)
   (check-equal? (execute `(add-bn 10 11)) 'err)
 
   ;;Test sub
@@ -360,9 +357,10 @@ type Expr =
   ;;Test sub-bn
   (check-equal? (execute `(sub-bn (bignum 1237940039285380274899124224) (bignum 1208925819614629174706176))) 1236731113465765645724418048)
   (check-equal? (execute `(sub-bn (bignum 204840021458546589812482594366668142542429986589197318528619143395036962199099876801) (bignum 204840021458546589812482594366668142542429986589197318528619143395036962199099876801))) 0)
-  (check-equal? (execute `(sub-bn (bignum 1237940039285380274899124224) 1)) 'err)
-  (check-equal? (execute `(sub-bn 1 (bignum 1237940039285380274899124224))) 'err)
+  (check-equal? (execute `(sub-bn (bignum 1237940039285380274899124224) 1)) 1237940039285380274899124223)
+  (check-equal? (execute `(sub-bn 1 (bignum 1237940039285380274899124224))) 1237940039285380274899124223)
   (check-equal? (execute `(sub-bn 2 1)) 'err)
-  (check-equal? (execute `(sub-bn (bignum 1237940039285380274899124224) (add 1 2))) 'err)
-  (check-equal? (execute `(add-bn (sub-bn (bignum 1) (bignum 10)) (bignum 19))) 10))
+  (check-equal? (execute `(sub-bn (bignum 1237940039285380274899124224) (add 1 2))) 1237940039285380274899124221)
+  (check-equal? (execute `(add-bn (sub-bn (bignum 1) (bignum 10)) 19)) 10)
+  (check-equal? (execute `(sub-bn (sub 6 1) (bignum 5))) 0))
     
