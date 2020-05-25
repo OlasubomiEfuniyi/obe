@@ -89,19 +89,29 @@ int64_t  addBignum(int64_t arg0, int64_t  arg1, int64_t arg2) {
 
 		arg1 = (arg1 ^ type_bignum);
 
+		
+		mpz_init(result2);
+		mpz_set_ui(result2, 0);
+
+		
 		//Parse the value as a base 10 number, reading it directly from the heap
 		//from the beginning of the string to the null character
 		flag = mpz_set_str(result1, ((char*) arg1), 10);
 		assert(flag == 0); //If the flag is not 0, then the operation failed
 
 
-		mpz_add_ui(addition_result, result1, (arg2 >> result_shift));
+		mpz_set_si(result2, (arg2 >> result_shift));
+
+		mpz_add(addition_result, result1, result2);
 	} else if (((arg1 & result_mask) == type_integer) && ((arg2 & result_mask) == type_bignum)) { //We are adding an integer to a bignum
 		/* Initialize the number */
-		mpz_init(result2);
+		mpz_init(result1);
 		mpz_init(addition_result);
 
 		mpz_set_ui(addition_result, 0);
+		mpz_set_si(result1, (arg1 >> result_shift));
+
+		mpz_init(result2);
 		mpz_set_ui(result2, 0);
 
 		arg2 = (arg2 ^ type_bignum);
@@ -112,7 +122,7 @@ int64_t  addBignum(int64_t arg0, int64_t  arg1, int64_t arg2) {
 		assert(flag == 0); //If the flag is not 0, then the operation failed
 
 
-		mpz_add_ui(addition_result, result2, (arg1 >> result_shift));
+		mpz_add(addition_result, result1, result2);
 	} else {
 		error();
 	}
@@ -159,8 +169,9 @@ int64_t  subBignum(int64_t arg0, int64_t  arg1, int64_t arg2) {
 		flag = mpz_set_str(result2, ((char*) arg2), 10);
 		assert(flag == 0); //If the flag is not 0, then the operation failed  
 		
-		//Perform addition
+		//Perform subtraction
 		mpz_sub(addition_result, result1, result2);
+			
 	} else if (((arg1 & result_mask) == type_bignum) && ((arg2 & result_mask) == type_integer)) { //We are adding an integer to a bignum
 		/* Initialize the number */
 		mpz_init(result1);
@@ -171,19 +182,30 @@ int64_t  subBignum(int64_t arg0, int64_t  arg1, int64_t arg2) {
 
 		arg1 = (arg1 ^ type_bignum);
 
+		
+		mpz_init(result2);
+		mpz_set_ui(result2, 0);
+
+		
 		//Parse the value as a base 10 number, reading it directly from the heap
 		//from the beginning of the string to the null character
 		flag = mpz_set_str(result1, ((char*) arg1), 10);
 		assert(flag == 0); //If the flag is not 0, then the operation failed
 
 
-		mpz_sub_ui(addition_result, result1, (arg2 >> result_shift));
+		mpz_set_si(result2, (arg2 >> result_shift));
+
+		mpz_sub(addition_result, result1, result2);
+	
 	} else if (((arg1 & result_mask) == type_integer) && ((arg2 & result_mask) == type_bignum)) { //We are adding an integer to a bignum
 		/* Initialize the number */
-		mpz_init(result2);
+		mpz_init(result1);
 		mpz_init(addition_result);
 
 		mpz_set_ui(addition_result, 0);
+		mpz_set_si(result1, (arg1 >> result_shift));
+
+		mpz_init(result2);
 		mpz_set_ui(result2, 0);
 
 		arg2 = (arg2 ^ type_bignum);
@@ -194,10 +216,11 @@ int64_t  subBignum(int64_t arg0, int64_t  arg1, int64_t arg2) {
 		assert(flag == 0); //If the flag is not 0, then the operation failed
 
 
-		mpz_sub_ui(addition_result, result2, (arg1 >> result_shift));
+		mpz_sub(addition_result, result1, result2);
 	} else {
 		error();
 	}
+
 
 	//Get the string representation of the result on the heap, as this is how bignums are stored in obe
 	char* res_str = mpz_get_str(((char *) arg0), 10, addition_result);

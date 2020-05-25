@@ -10,13 +10,29 @@
 (define type-bignum 1)
 
 #|
+type CEnv = Listof(Symbol)
+
 type Expr =
+|`(add ,Number ,Number)
+|`(sub ,Number ,Number)
+|`(add-bn (bignum ,integer) Number) | `(add-bn Number (bignum ,integer))
+|`(sub-bn (bignum ,integer) Number) | `(sub-bn Number (bignum ,integer))
+|LetBinding
+|Variable
+
+type Number =
 | integer
 |`(bignum ,integer)
-|`(add ,integer ,integer)
-|`(sub ,integer ,integer)
-|`(add-bn ,bignum ,bignum)
-|`(sub-bn ,bignum ,bignum)
+
+type LetBinding =
+| `(let (Binding*) Expr)
+
+type Binding =
+|`(Variable Expr)
+
+type Variable =
+|Symbol
+
 |#
 
 ;;Entry compile function
@@ -35,19 +51,59 @@ type Expr =
     ret))
 
 ;;The toplevel compile function from which the compilation of an expression begins
-;; Expr -> Listof(ASM)
+;; Expr CEnv -> Listof(ASM)
 (define (compile-e expr env)
   (match expr
-    [(? integer? expr) (compile-integer expr)]
-    [`(bignum ,e1) (compile-bignum e1 env)]
-    [`(add ,e1 ,e2) (compile-add e1 e2 env)]
-    [`(sub ,e1 ,e2) (compile-sub e1 e2 env)]
-    [`(add-bn ,e1 ,e2) (compile-add-bn e1 e2 env)]
-    [`(sub-bn ,e1 ,e2) (compile-sub-bn e1 e2 env)]
+    [(? num? expr) (compile-number expr env)]
+    [(? arithmetic? expr) (compile-arithmetic expr env)]
+    [(? let-binding? expr) (compile-let-binding expr env)]
+    [(? variable? expr) (compile-variable expr env)]
     [_ (error "Invalid Program")]))
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile Values;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;Compile an arithmetic expression into ASM
+;;Number CEnv -> ASM
+(define (compile-arithmetic expr env)
+  (match expr
+    [`(add ,e1 ,e2) (compile-add e1 e2 env)]
+    [`(sub ,e1 ,e2) (compile-sub e1 e2 env)]
+    [`(add-bn ,e1 ,e2) (compile-add-bn e1 e2 env)]
+    [`(sub-bn ,e1 ,e2) (compile-sub-bn e1 e2 env)]))
+
+;;Compile a Number value into ASM
+;;Number CEnv -> ASM
+(define (compile-number expr env)
+  (match expr
+    [(? integer? expr) (compile-integer expr)]
+    [`(bignum ,e1) (compile-bignum e1 env)]))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;:::::Compile LetBinding;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;Compile a let binding
+;;LetBinding CEnv -> ASM
+(define (compile-let-binding expr env)
+  (match expr
+    [`(let ((,(? symbol? xs) ,es)...) ,e) (compile-let xs es e env)]))
+
+;;Compile a let binding going from left to right
+(define (compile-let xs es e env)
+  (let ((ces (compile-es es env)))
+    `(,@ces
+      ;;xs is reversed so that the order of the variable names corresponds to
+      ;;how they were placed on the stack
+      ,@(compile-e e (append (reverse xs) env)) 
+      )))
+ 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile Variable;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;Compile a variable
+;;Variable -> ASM
+(define (compile-variable v env)
+  `(
+    ;;Lookup the value of the variable based on its compile time position
+    (mov rax (offset rsp ,(- (add1 (lookup v env)))))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile Number;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Compile an integer into assembly, placing the value in rax
 ;;Expr -> ASM
 (define (compile-integer i)
@@ -57,7 +113,7 @@ type Expr =
 
 ;:Compile an integer into assebmly, placing the value on the heap alongside how many bytes it takes up
 ;;Note: Racket allows arbitrary precision for its integer values
-;;Expr -> ASM
+;;Expr CEnv -> ASM
 ;;
 (define (compile-bignum num env)
   #|(let ((c1 (compile-e e1 env))
@@ -132,7 +188,7 @@ type Expr =
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;:::::::::::Compile Arithmetic Operations;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Compile the addition of two expressions
-;;Expr Expr -> ASM
+;;Expr Expr CEnv -> ASM
 (define (compile-add e1 e2 env)
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env))))
@@ -146,7 +202,7 @@ type Expr =
       (add rax (offset rsp ,(- (add1 (length env))))))))
 
 ;;Compile the subtraction of two expressions
-;;Expr Expr -> ASM
+;;Expr Expr CEnv -> ASM
 (define (compile-sub e1 e2 env)
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env))))
@@ -166,7 +222,7 @@ type Expr =
       (or rax ,type-integer))))
 
 ;;Compile the addition of two big nums
-;;Expr Expr -> ASM
+;;Expr Expr CEnv-> ASM
 (define (compile-add-bn e1 e2 env)
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env))))
@@ -220,7 +276,7 @@ type Expr =
 
 
 ;;Compile the subtraction of two bignums
-;;Expr Expr -> ASM
+;;Expr Expr CEnv-> ASM
 (define (compile-sub-bn e1 e2 env)
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env))))
@@ -289,6 +345,17 @@ type Expr =
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Helper Functions;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;Compile a list of expressions
+;;Listof(Expr) CEnv -> ASM
+(define (compile-es es env)
+  (match es
+    ['() '()]
+    [(cons e es)
+     `(,@(compile-e e env)
+       (mov (offset rsp ,(- (add1 (length env)))) rax) ;;Save the value on the top of the stack 
+       ,@(compile-es es (extend #f env))
+       )]))
+
 ;;Compile a list of characters by placing each of them on the heap one byte at a time
 ;;No result is returned in rax.
 ;;listof(characters) -> ASM
@@ -316,8 +383,45 @@ type Expr =
 ;;Symbol Listof(Symbol) -> Listof(Sybmol)
 (define (extend v env)
   (cons v env))
-  
-;;;;;;;;;;;;;;;;;;;;Tests;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;Find the index of the first occurence of v in env
+;;Variable CEnv -> number
+(define (lookup v env)
+  (let ((t (member v env)))
+    (if t
+        (sub1 (length t))
+        (error (string-append "Variable " (symbol->string v) "not in scope")))))
+
+                      
+
+;;Determine if the expression is a number
+;;Expr -> boolean
+(define (num? expr)
+  (match expr
+    [(? integer?) #t]
+    [`(bignum ,n) #t]
+    [_ #f]))
+
+;;Determine if the expression is an arithmetic operation
+;;Expr -> boolean
+(define (arithmetic? expr)
+  (match expr
+    [(list (or 'add 'sub 'add-bn 'sub-bn) e1 e2) #t]
+    [_ #f]))
+
+;;Determine if the expression is a let binding
+;;Expr -> boolean
+(define (let-binding? expr)
+  (match expr
+    [`(let ((,(? symbol?) ,r1)...) ,e) #t]
+    [_ #f]))
+
+;;Determine if the expression is a variable
+;;Expr -> boolean
+(define (variable? expr)
+  (symbol? expr))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Tests;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (module+ test
   ;;Test integers
   (check-equal? (execute 5) 5)
@@ -358,9 +462,20 @@ type Expr =
   (check-equal? (execute `(sub-bn (bignum 1237940039285380274899124224) (bignum 1208925819614629174706176))) 1236731113465765645724418048)
   (check-equal? (execute `(sub-bn (bignum 204840021458546589812482594366668142542429986589197318528619143395036962199099876801) (bignum 204840021458546589812482594366668142542429986589197318528619143395036962199099876801))) 0)
   (check-equal? (execute `(sub-bn (bignum 1237940039285380274899124224) 1)) 1237940039285380274899124223)
-  (check-equal? (execute `(sub-bn 1 (bignum 1237940039285380274899124224))) 1237940039285380274899124223)
+  (check-equal? (execute `(sub-bn 1 (bignum 1237940039285380274899124224))) -1237940039285380274899124223)
   (check-equal? (execute `(sub-bn 2 1)) 'err)
   (check-equal? (execute `(sub-bn (bignum 1237940039285380274899124224) (add 1 2))) 1237940039285380274899124221)
   (check-equal? (execute `(add-bn (sub-bn (bignum 1) (bignum 10)) 19)) 10)
-  (check-equal? (execute `(sub-bn (sub 6 1) (bignum 5))) 0))
-    
+  (check-equal? (execute `(sub-bn (sub 6 1) (bignum 5))) 0)
+
+  ;;Test let
+  (check-equal? (execute `(let () 5)) 5)
+  (check-equal? (execute `(let ((x 5)) x)) 5)
+  (check-equal? (execute `(let ((a 1) (b (bignum 2))) b)) 2)
+  (check-equal? (execute `(let ((a 1) (b (bignum 2))) (add-bn a b))) 3)
+  (check-equal? (execute `(let () (add-bn 5 5))) 'err)
+  (check-equal? (execute `(let ((x (add-bn 5 5))) 5)) 'err)
+  (check-equal? (execute `(let ((x 10)) (let ((x (let ((x 4) (y 6)) (sub x y)))) x))) -2)
+  (check-equal? (execute `(let ((x 10)) (let ((x (let ((x 4) (y 6)) (sub x y)))) (add x 2)))) 0)
+  (check-equal? (execute `(let ((x 10)) (let ((x (let ((x 4) (y 6)) (sub x y)))) (add-bn x (bignum 2))))) 0))
+
