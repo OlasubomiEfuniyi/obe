@@ -17,6 +17,7 @@ type StackOperation =
 type Arithmetic =
 |'(add Arg Arg)
 |'(sub Arg Arg)
+|'(div Arg)
 |'(or Arg Arg)
 |'(and Arg Arg)
 |'(xor Arg Arg)
@@ -32,7 +33,9 @@ type Transfer =
 
 type ControlFlow =
 |'ret
-|'jne
+|'(jmp ,Symbol)
+|'(jne ,Symbol)
+|'(je ,Symbol)
 
 type Arg =
 | Value
@@ -100,7 +103,9 @@ type Register
 (define (control-flow->assembly cf)
   (match cf
     ['ret "ret"]
+    [`(jmp ,lab) (string-append "jmp " (symbol->string lab))]
     [`(jne ,lab) (string-append "jne " (symbol->string lab))]
+    [`(je ,lab) (string-append "je " (symbol->string lab))]
     [`(call ,lab) (string-append "call " (symbol->string lab))]
     [_ (error "Unsupported control flow")]))
 
@@ -119,6 +124,7 @@ type Register
     [`(or ,arg1 ,arg2) (string-append "or " (arg->string arg1) ", " (arg->string arg2))]
     [`(and ,arg1 ,arg2) (string-append "and " (arg->string arg1) ", " (arg->string arg2))]
     [`(xor ,arg1 ,arg2) (string-append "xor " (arg->string arg1) ", " (arg->string arg2))]
+    [`(div ,arg1) (string-append "div " (arg->string arg1))]
     [_ (error "Unsopported arithmetic operation")]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;String conversion funcitons;;;;;;;;;;;;;;;;;;;;;;;
@@ -156,7 +162,7 @@ type Register
 (define (control-flow? asm)
   (match asm
     ['ret #t]
-    [(list (or 'jne 'call) lab) #t]
+    [(list (or 'jmp 'jne 'je 'call) lab) #t]
     [_ #f]))
 
 ;;Determine if the argument is  a Value
@@ -180,6 +186,7 @@ type Register
     [`(or ,a ,b) #t]
     [`(and ,a ,b) #t]
     [`(xor ,a ,b) #t]
+    [`(div ,a) #t]
     [_ #f]))
 
 ;;Determine if the argument is a comparison instruction
