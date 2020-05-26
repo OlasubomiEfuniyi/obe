@@ -17,8 +17,12 @@ type Expr =
 |`(sub ,Number ,Number)
 |`(add-bn (bignum ,integer) Number) | `(add-bn Number (bignum ,integer))
 |`(sub-bn (bignum ,integer) Number) | `(sub-bn Number (bignum ,integer))
+|Decision
 |LetBinding
 |Variable
+
+type Decision =
+|`(if Expr Expr Expr)
 
 type Number =
 | integer
@@ -58,6 +62,7 @@ type Variable =
     [(? arithmetic? expr) (compile-arithmetic expr env)]
     [(? let-binding? expr) (compile-let-binding expr env)]
     [(? variable? expr) (compile-variable expr env)]
+    [(? decision? expr) (compile-decision expr env)]
     [_ (error "Invalid Program")]))
 
 
@@ -96,12 +101,40 @@ type Variable =
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile Variable;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Compile a variable
-;;Variable -> ASM
+;;Variable CEnv -> ASM
 (define (compile-variable v env)
   `(
     ;;Lookup the value of the variable based on its compile time position
     (mov rax (offset rsp ,(- (add1 (lookup v env)))))))
 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile Decision;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;Compile a decision
+;;Decision CEnv -> ASM
+(define (compile-decision d env)
+  (match d
+    [`(if ,e1 ,e2 ,e3) (compile-if e1 e2 e3 env)]))
+
+
+;;Compile an if expression
+;;Expr Expr Expr CEnv -> ASM
+(define (compile-if e1 e2 e3 env)
+  (let ((c1 (compile-e e1 env))
+        (c2 (compile-e e2 env))
+        (c3 (compile-e e3 env))
+        (true (gensym "true"))
+        (false (gensym "false"))
+        (end (gensym "end")))
+    `(,@c1
+      (cmp rax 0) ;;Only 0 is considered false. A bignum with the value of 0 will not pass this check
+      (jne ,true)
+      ,false
+      ,@c3
+      (jmp ,end)
+      ,true
+      ,@c2
+      ,end
+      )))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile Number;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Compile an integer into assembly, placing the value in rax
@@ -375,6 +408,13 @@ type Variable =
 (define (variable? expr)
   (symbol? expr))
 
+;;Determine if the expression is a decision
+;;Expr -> boolean
+(define (decision? expr)
+  (match expr
+    [`(if ,a ,b ,c) #t]
+    [_ #f]))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Tests;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (module+ test
   #|;;Test integers
@@ -423,7 +463,7 @@ type Variable =
   (check-equal? (execute `(sub-bn (sub 6 1) (bignum 5))) 0)|#
 
   ;;Test let
-  (check-equal? (execute `(let () 5)) 5)
+  #|(check-equal? (execute `(let () 5)) 5)
   (check-equal? (execute `(let ((x 5)) x)) 5)
   (check-equal? (execute `(let ((a 1) (b (bignum 2))) b)) 2)
   (check-equal? (execute `(let ((a 1) (b (bignum 2))) (add-bn a b))) 3)
@@ -437,5 +477,15 @@ type Variable =
   (check-equal? (execute `(let ((var1 6) (var2 7) (var3 (bignum 8))) (add var1 var2) (sub (add-bn var2 var3) 5))) 'err)
   (check-equal? (execute `(let ((var1 6) (var2 7) (var3 (bignum 8))) (add-bn var1 var2) (sub-bn (add-bn var2 var3) 5))) 'err)
   (check-equal? (execute `(let ((length (add 2 3)) (breadth (sub-bn (add-bn 1 (bignum 10)) (sub-bn (bignum 8) 2))) (height (sub 6 1))) (add-bn (add-bn length breadth) height)
-                            (add length length) (sub-bn length breadth) (let ((f-dim (add-bn length breadth))) length f-dim))) 10))
+                            (add length length) (sub-bn length breadth) (let ((f-dim (add-bn length breadth))) length f-dim))) 10)|#
+
+  ;;Test if expression
+  (check-equal? (execute `(if (add 1 2) (add 1 3) (sub 1 2))) 4)
+  (check-equal? (execute `(if (add -1 1) (add 1 3) (sub 1 2))) -1)
+  (check-equal? (execute `(if (bignum 12345678912345678912345678912345678912345678901234567890123456789123456789012345678901234567890) (add 1 3) (sub 1 2))) 4)
+  (check-equal? (execute `(if (sub-bn (bignum 12345678912345678912345678912345678912345678901234567890123456789123456789012345678901234567890) (bignum 12345678912345678912345678912345678912345678901234567890123456789123456789012345678901234567890)) (add 1 3) (sub 1 2))) 4)
+  (check-equal? (execute `(if (let ((var1 1) (var2 (let ((var1 2) (var2 3)) (add var1 var2)))) (sub var2 var1)) 1 2)) 1)
+  (check-equal? (execute `(if 0 1 (let ((var1 1) (var2 (let ((var1 2) (var2 3)) (add var1 var2)))) (sub var2 var1)))) 4)
+  (check-equal? (execute `(let ((x (if 1 2 3)) (y (if (add 0 1) 5 6))) (if (sub x y) x y))) 2))
+  
 
