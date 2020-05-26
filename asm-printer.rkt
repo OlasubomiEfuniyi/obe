@@ -67,7 +67,7 @@ type Register
 ;;Listof(ASM) -> string
 (define (asm->assembly lst)
   (match lst
-    [(cons h lst) (string-append "\t" (asm->assembly-helper h) "\n" (asm->assembly lst))]
+    [(cons h lst) (string-append (asm->assembly-helper h) "\n" (asm->assembly lst))]
     ['() ""]
     [_ (error "Expected a list of ASM")]))
 
@@ -88,43 +88,43 @@ type Register
 ;;ASM -> string
 (define (stack-operation->assembly asm)
   (match asm
-    [`(push ,arg) (string-append "push " (arg->string arg))]
-    [`(pop ,arg) (string-append "pop " (arg->string arg))]
+    [`(push ,arg) (string-append "\tpush " (arg->string arg))]
+    [`(pop ,arg) (string-append "\tpop " (arg->string arg))]
     [_ (error "Unsupported stack-operation")]))
 
 ;;Convert transfer instruction to executable assembly
 ;;ASM -> string
 (define (transfer->assembly asm)
   (match asm
-    [(list op arg1 arg2) (string-append (symbol->string op) " " (arg->string arg1) ", " (arg->string arg2))]
+    [(list op arg1 arg2) (string-append "\t" (symbol->string op) " " (arg->string arg1) ", " (arg->string arg2))]
     [_ (error "Unsupported transfer operation")]))
 
 ;:Convert a control flow instruction to executable assembly
 (define (control-flow->assembly cf)
   (match cf
-    ['ret "ret"]
-    [`(jmp ,lab) (string-append "jmp " (symbol->string lab))]
-    [`(jne ,lab) (string-append "jne " (symbol->string lab))]
-    [`(je ,lab) (string-append "je " (symbol->string lab))]
-    [`(call ,lab) (string-append "call " (symbol->string lab))]
+    ['ret "\tret"]
+    [`(jmp ,lab) (string-append "\tjmp " (symbol->string lab))]
+    [`(jne ,lab) (string-append "\tjne " (symbol->string lab))]
+    [`(je ,lab) (string-append "\tje " (symbol->string lab))]
+    [`(call ,lab) (string-append "\tcall " (symbol->string lab))]
     [_ (error "Unsupported control flow")]))
 
 ;;Convert a comparison instruction to executable assembly
 (define (comparison->assembly asm)
   (match asm
-    [`(cmp ,arg1 ,arg2) (string-append "cmp " (arg->string arg1) ", " (arg->string arg2))]
+    [`(cmp ,arg1 ,arg2) (string-append "\tcmp " (arg->string arg1) ", " (arg->string arg2))]
     [_ (error "Unsupported comparison instruction")]))
 
 ;;Convert a arithmetic instruction to executable assembly
 ;;ASM -> string
 (define (arithmetic->assembly asm)
   (match asm
-    [`(add ,arg1 ,arg2) (string-append "add " (arg->string arg1) ", " (arg->string arg2))]
-    [`(sub ,arg1 ,arg2) (string-append "sub " (arg->string arg1) ", " (arg->string arg2))]
-    [`(or ,arg1 ,arg2) (string-append "or " (arg->string arg1) ", " (arg->string arg2))]
-    [`(and ,arg1 ,arg2) (string-append "and " (arg->string arg1) ", " (arg->string arg2))]
-    [`(xor ,arg1 ,arg2) (string-append "xor " (arg->string arg1) ", " (arg->string arg2))]
-    [`(div ,arg1) (string-append "div " (arg->string arg1))]
+    [`(add ,arg1 ,arg2) (string-append "\tadd " (arg->string arg1) ", " (arg->string arg2))]
+    [`(sub ,arg1 ,arg2) (string-append "\tsub " (arg->string arg1) ", " (arg->string arg2))]
+    [`(or ,arg1 ,arg2) (string-append "\tor " (arg->string arg1) ", " (arg->string arg2))]
+    [`(and ,arg1 ,arg2) (string-append "\tand " (arg->string arg1) ", " (arg->string arg2))]
+    [`(xor ,arg1 ,arg2) (string-append "\txor " (arg->string arg1) ", " (arg->string arg2))]
+    [`(div ,arg1) (string-append "\tdiv " (arg->string arg1))]
     [_ (error "Unsopported arithmetic operation")]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;String conversion funcitons;;;;;;;;;;;;;;;;;;;;;;;

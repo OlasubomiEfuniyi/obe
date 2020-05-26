@@ -377,7 +377,7 @@ type Variable =
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Tests;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (module+ test
-  ;;Test integers
+  #|;;Test integers
   (check-equal? (execute 5) 5)
   (check-equal? (execute -5) -5)
   
@@ -420,7 +420,7 @@ type Variable =
   (check-equal? (execute `(sub-bn 2 1)) 'err)
   (check-equal? (execute `(sub-bn (bignum 1237940039285380274899124224) (add 1 2))) 1237940039285380274899124221)
   (check-equal? (execute `(add-bn (sub-bn (bignum 1) (bignum 10)) 19)) 10)
-  (check-equal? (execute `(sub-bn (sub 6 1) (bignum 5))) 0)
+  (check-equal? (execute `(sub-bn (sub 6 1) (bignum 5))) 0)|#
 
   ;;Test let
   (check-equal? (execute `(let () 5)) 5)
@@ -435,5 +435,7 @@ type Variable =
   (check-equal? (execute `(let ((var1 6)  (var2 7) (var3 (bignum 8))) (add-bn 3 (bignum 8)))) 11)
   (check-equal? (execute `(let ((var1 6) (var2 7) (var3 (bignum 8))) (add var1 var2) (sub-bn (add-bn var2 var3) 5))) 10)
   (check-equal? (execute `(let ((var1 6) (var2 7) (var3 (bignum 8))) (add var1 var2) (sub (add-bn var2 var3) 5))) 'err)
-  (check-equal? (execute `(let ((var1 6) (var2 7) (var3 (bignum 8))) (add-bn var1 var2) (sub-bn (add-bn var2 var3) 5))) 'err))
+  (check-equal? (execute `(let ((var1 6) (var2 7) (var3 (bignum 8))) (add-bn var1 var2) (sub-bn (add-bn var2 var3) 5))) 'err)
+  (check-equal? (execute `(let ((length (add 2 3)) (breadth (sub-bn (add-bn 1 (bignum 10)) (sub-bn (bignum 8) 2))) (height (sub 6 1))) (add-bn (add-bn length breadth) height)
+                            (add length length) (sub-bn length breadth) (let ((f-dim (add-bn length breadth))) length f-dim))) 10))
 
