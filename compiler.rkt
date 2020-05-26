@@ -225,7 +225,8 @@ type Variable =
 ;;Expr Expr CEnv-> ASM
 (define (compile-add-bn e1 e2 env)
   (let ((c1 (compile-e e1 env))
-        (c2 (compile-e e2 (extend #f env))))
+        (c2 (compile-e e2 (extend #f env)))
+        (stack-size (* 8 (+ 4 (length env)))))
     `(,@c1
       (mov (offset rsp ,(- (add1 (length env)))) rax) ;;Save the result of evaluating the first expression on the stack to prevent clobbering
       
@@ -247,7 +248,7 @@ type Variable =
 
 
       
-      (sub rsp 32);;Make rsp point to the top of the stack
+      (sub rsp ,stack-size);;Make rsp point to the top of the stack
       (call addBignum)
 
   
@@ -256,7 +257,7 @@ type Variable =
       ;;call
       (mov rbx r15)
       (sub rbx rsp)
-      (cmp rbx 32)
+      (cmp rbx ,stack-size)
       (jne err)
       (mov rsp r15)
 
@@ -279,7 +280,8 @@ type Variable =
 ;;Expr Expr CEnv-> ASM
 (define (compile-sub-bn e1 e2 env)
   (let ((c1 (compile-e e1 env))
-        (c2 (compile-e e2 (extend #f env))))
+        (c2 (compile-e e2 (extend #f env)))
+        (stack-size (* 8 (+ 4 (length env)))))
     `(,@c1
       (mov (offset rsp ,(- (add1 (length env)))) rax) ;;Save the result of evaluating the first expression on the stack to prevent clobbering
       
@@ -301,7 +303,7 @@ type Variable =
 
 
       
-      (sub rsp 32);;Make rsp point to the top of the stack
+      (sub rsp ,stack-size);;Make rsp point to the top of the stack
       (call subBignum)
 
   
@@ -310,7 +312,7 @@ type Variable =
       ;;call
       (mov rbx r15)
       (sub rbx rsp)
-      (cmp rbx 32)
+      (cmp rbx ,stack-size)
       (jne err)
       (mov rsp r15)
 
@@ -477,5 +479,6 @@ type Variable =
   (check-equal? (execute `(let ((x (add-bn 5 5))) 5)) 'err)
   (check-equal? (execute `(let ((x 10)) (let ((x (let ((x 4) (y 6)) (sub x y)))) x))) -2)
   (check-equal? (execute `(let ((x 10)) (let ((x (let ((x 4) (y 6)) (sub x y)))) (add x 2)))) 0)
-  (check-equal? (execute `(let ((x 10)) (let ((x (let ((x 4) (y 6)) (sub x y)))) (add-bn x (bignum 2))))) 0))
+  (check-equal? (execute `(let ((x 10)) (let ((x (let ((x 4) (y 6)) (sub x y)))) (add-bn x (bignum 2))))) 0)
+  (check-equal? (execute `(let ((var1 6)  (var2 7) (var3 (bignum 8))) (add-bn 3 (bignum 8)))) 11))
 
