@@ -5,10 +5,13 @@
 #include <assert.h>
 #include <string.h>
 
-#define result_mask 1
-#define result_shift 1
-#define type_integer 0
-#define type_bignum 1
+#define result_mask 0b111
+#define result_shift 3
+#define type_integer 0b000
+#define type_bignum 0b001
+#define type_true 0b010
+#define type_false 0b011
+
 #define heap_size 10000000
 
 int64_t entry(void* heap);
@@ -37,7 +40,13 @@ int main(int argc, char** argv) {
 	case type_bignum:		
 		printBignum(value);	
 		break;
-	} 
+	case type_true:
+		printf("#t\n");
+		break;
+	case type_false:
+		printf("#f\n");
+		break;	
+	}
 
 	free(heap);
 	return 0;

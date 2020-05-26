@@ -5,14 +5,20 @@
 (module+ test
   (require rackunit))
 
-(define type-mask 1)
-(define type-integer 0)
-(define type-bignum 1)
+(define shift 3)
+(define type-mask #b111)
+(define type-integer #b000)
+(define type-bignum #b001)
+(define type-true #b010)
+(define type-false #b011)
+
 
 #|
 type CEnv = Listof(Symbol)
 
 type Expr =
+|Number
+|Boolean
 |`(add ,Number ,Number)
 |`(sub ,Number ,Number)
 |`(add-bn (bignum ,integer) Number) | `(add-bn Number (bignum ,integer))
@@ -24,6 +30,10 @@ type Expr =
 type Decision =
 |`(if Expr Expr Expr)
 
+type Boolean =
+|`#t
+|`#f
+
 type Number =
 | integer
 |`(bignum ,integer)
@@ -31,7 +41,7 @@ type Number =
 type LetBinding =
 | `(let (Binding*) Expr+)
 
-type Binding =
+type Binracketding =
 |`(Variable Expr)
 
 type Variable =
@@ -59,6 +69,7 @@ type Variable =
 (define (compile-e expr env)
   (match expr
     [(? num? expr) (compile-number expr env)]
+    [(? boolean? expr) (compile-boolean expr)]
     [(? arithmetic? expr) (compile-arithmetic expr env)]
     [(? let-binding? expr) (compile-let-binding expr env)]
     [(? variable? expr) (compile-variable expr env)]
@@ -126,15 +137,25 @@ type Variable =
         (false (gensym "false"))
         (end (gensym "end")))
     `(,@c1
-      (cmp rax 0) ;;Only 0 is considered false. A bignum with the value of 0 will not pass this check
-      (jne ,true)
-      ,false
-      ,@c3
-      (jmp ,end)
+      (cmp rax 0) ;;Only 0 and #f is considered false. A bignum with the value of 0 will not pass this check
+      (je ,false)
+      (cmp rax ,type-false)
+      (je ,false)
       ,true
       ,@c2
+      (jmp ,end)
+      ,false
+      ,@c3
       ,end
       )))
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;:Compile Boolean;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;Compile a boolean into assembly, placing the value in rax
+;;Boolean -> ASM
+(define (compile-boolean b)
+  `((mov rax ,(if b type-true type-false))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile Number;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Compile an integer into assembly, placing the value in rax
@@ -142,7 +163,7 @@ type Variable =
 (define (compile-integer i)
   ;;Integers are tagged with a 0 as the least significant bit. This means the biggest integer that can be represented is
   ;;2^62 - 1 without using bignums
-  `((mov rax ,(arithmetic-shift i 1))))
+  `((mov rax ,(arithmetic-shift i shift))))
 
 ;:Compile an integer into assebmly, placing the value on the heap alongside how many bytes it takes up
 ;;Note: Racket allows arbitrary precision for its integer values
@@ -417,7 +438,7 @@ type Variable =
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Tests;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (module+ test
-  #|;;Test integers
+  ;;Test integers
   (check-equal? (execute 5) 5)
   (check-equal? (execute -5) -5)
   
@@ -427,7 +448,7 @@ type Variable =
   
   ;;Test add
   (check-equal? (execute `(add 5 8)) 13)
-  (check-equal? (execute `(add 4611686018427387902 1)) 4611686018427387903)
+  (check-equal? (execute `(add 1152921504606846974 1)) 1152921504606846975)
   (check-equal? (execute `(add (bignum 1) 5)) 'err)
   (check-equal? (execute `(add 5 (bignum 1))) 'err)
   (check-equal? (execute `(add (bignum 1) (bignum 6))) 'err)
@@ -460,10 +481,10 @@ type Variable =
   (check-equal? (execute `(sub-bn 2 1)) 'err)
   (check-equal? (execute `(sub-bn (bignum 1237940039285380274899124224) (add 1 2))) 1237940039285380274899124221)
   (check-equal? (execute `(add-bn (sub-bn (bignum 1) (bignum 10)) 19)) 10)
-  (check-equal? (execute `(sub-bn (sub 6 1) (bignum 5))) 0)|#
+  (check-equal? (execute `(sub-bn (sub 6 1) (bignum 5))) 0)
 
   ;;Test let
-  #|(check-equal? (execute `(let () 5)) 5)
+  (check-equal? (execute `(let () 5)) 5)
   (check-equal? (execute `(let ((x 5)) x)) 5)
   (check-equal? (execute `(let ((a 1) (b (bignum 2))) b)) 2)
   (check-equal? (execute `(let ((a 1) (b (bignum 2))) (add-bn a b))) 3)
@@ -477,15 +498,25 @@ type Variable =
   (check-equal? (execute `(let ((var1 6) (var2 7) (var3 (bignum 8))) (add var1 var2) (sub (add-bn var2 var3) 5))) 'err)
   (check-equal? (execute `(let ((var1 6) (var2 7) (var3 (bignum 8))) (add-bn var1 var2) (sub-bn (add-bn var2 var3) 5))) 'err)
   (check-equal? (execute `(let ((length (add 2 3)) (breadth (sub-bn (add-bn 1 (bignum 10)) (sub-bn (bignum 8) 2))) (height (sub 6 1))) (add-bn (add-bn length breadth) height)
-                            (add length length) (sub-bn length breadth) (let ((f-dim (add-bn length breadth))) length f-dim))) 10)|#
+                            (add length length) (sub-bn length breadth) (let ((f-dim (add-bn length breadth))) length f-dim))) 10)
 
+  ;;Test booleans
+  (check-equal? (execute `#t) #t)
+  (check-equal? (execute `#f) #f)
+  
   ;;Test if expression
   (check-equal? (execute `(if (add 1 2) (add 1 3) (sub 1 2))) 4)
   (check-equal? (execute `(if (add -1 1) (add 1 3) (sub 1 2))) -1)
+  (check-equal? (execute `(if #t 5 6)) 5)
+  (check-equal? (execute `(if #f 5 6)) 6)
+  (check-equal? (execute `(if 5 #t #f)) #t)
+  (check-equal? (execute `(if 0 #t #f)) #f)
   (check-equal? (execute `(if (bignum 12345678912345678912345678912345678912345678901234567890123456789123456789012345678901234567890) (add 1 3) (sub 1 2))) 4)
   (check-equal? (execute `(if (sub-bn (bignum 12345678912345678912345678912345678912345678901234567890123456789123456789012345678901234567890) (bignum 12345678912345678912345678912345678912345678901234567890123456789123456789012345678901234567890)) (add 1 3) (sub 1 2))) 4)
   (check-equal? (execute `(if (let ((var1 1) (var2 (let ((var1 2) (var2 3)) (add var1 var2)))) (sub var2 var1)) 1 2)) 1)
   (check-equal? (execute `(if 0 1 (let ((var1 1) (var2 (let ((var1 2) (var2 3)) (add var1 var2)))) (sub var2 var1)))) 4)
   (check-equal? (execute `(let ((x (if 1 2 3)) (y (if (add 0 1) 5 6))) (if (sub x y) x y))) 2))
+
+
   
 
