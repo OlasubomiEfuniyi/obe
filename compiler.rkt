@@ -25,7 +25,7 @@ type Number =
 |`(bignum ,integer)
 
 type LetBinding =
-| `(let (Binding*) Expr)
+| `(let (Binding*) Expr+)
 
 type Binding =
 |`(Variable Expr)
@@ -82,15 +82,15 @@ type Variable =
 ;;LetBinding CEnv -> ASM
 (define (compile-let-binding expr env)
   (match expr
-    [`(let ((,(? symbol? xs) ,es)...) ,e) (compile-let xs es e env)]))
+    [`(let ((,(? symbol? xs) ,es) ...) ,exps ..1) (compile-let xs es exps env)]))
 
 ;;Compile a let binding going from left to right
-(define (compile-let xs es e env)
+(define (compile-let xs es exps env)
   (let ((ces (compile-es es env)))
     `(,@ces
       ;;xs is reversed so that the order of the variable names corresponds to
       ;;how they were placed on the stack
-      ,@(compile-e e (append (reverse xs) env)) 
+      ,@(compile-es exps (append (reverse xs) env)) 
       )))
  
 
@@ -116,54 +116,6 @@ type Variable =
 ;;Expr CEnv -> ASM
 ;;
 (define (compile-bignum num env)
-  #|(let ((c1 (compile-e e1 env))
-        (loop (gensym "loop"))
-        (loop2 (gensym "loop"))
-        (end (gensym "end"))
-        (end2 (gensym "end")))
-    `(,@c1
-      ,@assert-integer ;;Only integers can be made into bignums
-      ;;Save a pointer to the beginning of the bignum on the stack
-      (mov ,(- (add1 (length env))) rdi)
-      
-      ;;Initialize the counter
-      (mov rbx 0)
-      
-      ;;Repeatedly divide by 10 to get quotient and remainder until quotient is 0
-      ,loop
-      (cmp rax 0)
-      (je end)
-      (mov rdx 0)
-      ;;Move the character representation of the remainder onto the heap
-      (div 10)
-      (add rdx 30)
-      (mov (offset rdi 0) rdx)
-      (add rdi 1)
-      (add rbx 1)
-      (jmp ,loop)
-      ,end
-      
-      ;;Null terminate the string
-      (mov (offset rdi 0) 0)
-      (add rdi 1)
-      (add rbx 1)
-      
-      ;;Continue to add null characters until rbx is a multiple of 8. We assume rdi was a multiple of 8 to begin with
-      ,loop2
-      (mov rax rbx)
-      (mov rdx 0)
-      (div 8)
-      (cmp rdx 0) ;;No remainder means that rdi which was incremented rbx times is a multiple of 8
-      (je ,end2)
-      (mov (offset rdi 0) 0) ;;Pad with extra null character
-      (add rdi 1)
-      (add rbx 1)
-      (jmp loop2)
-      
-      ,end2
-      (mov rax ,(- (add1 (length env))))
-      (or rax ,type-bignum)
-      )))|#
   (let* (
          (num-string (number->string num))
          (len (+ (string-length num-string) 1)) ;;The number of bytes of characters to be used since each character is one byte
@@ -415,7 +367,7 @@ type Variable =
 ;;Expr -> boolean
 (define (let-binding? expr)
   (match expr
-    [`(let ((,(? symbol?) ,r1)...) ,e) #t]
+    [`(let ((,(? symbol?) ,r1) ...) ,e ..1) #t]
     [_ #f]))
 
 ;;Determine if the expression is a variable
@@ -480,5 +432,8 @@ type Variable =
   (check-equal? (execute `(let ((x 10)) (let ((x (let ((x 4) (y 6)) (sub x y)))) x))) -2)
   (check-equal? (execute `(let ((x 10)) (let ((x (let ((x 4) (y 6)) (sub x y)))) (add x 2)))) 0)
   (check-equal? (execute `(let ((x 10)) (let ((x (let ((x 4) (y 6)) (sub x y)))) (add-bn x (bignum 2))))) 0)
-  (check-equal? (execute `(let ((var1 6)  (var2 7) (var3 (bignum 8))) (add-bn 3 (bignum 8)))) 11))
+  (check-equal? (execute `(let ((var1 6)  (var2 7) (var3 (bignum 8))) (add-bn 3 (bignum 8)))) 11)
+  (check-equal? (execute `(let ((var1 6) (var2 7) (var3 (bignum 8))) (add var1 var2) (sub-bn (add-bn var2 var3) 5))) 10)
+  (check-equal? (execute `(let ((var1 6) (var2 7) (var3 (bignum 8))) (add var1 var2) (sub (add-bn var2 var3) 5))) 'err)
+  (check-equal? (execute `(let ((var1 6) (var2 7) (var3 (bignum 8))) (add-bn var1 var2) (sub-bn (add-bn var2 var3) 5))) 'err))
 
