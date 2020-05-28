@@ -11,21 +11,39 @@
 (define type-bignum #b001)
 (define type-true #b010)
 (define type-false #b011)
+(define type-empty-list #b111)
+(define type-list #b100)
 
 
 #|
 type CEnv = Listof(Symbol)
 
 type Expr =
+|Value
+|Arithmetic
+|Decision
+|LetBinding
+|Variable
+|ListOp
+
+
+type ListOp =
+|`(head List)
+|`(tail List)
+
+type Value =
 |Number
 |Boolean
+|List
+
+type List =
+|``(Expr*)
+
+type Arithmetic =
 |`(add ,Number ,Number)
 |`(sub ,Number ,Number)
 |`(add-bn (bignum ,integer) Number) | `(add-bn Number (bignum ,integer))
 |`(sub-bn (bignum ,integer) Number) | `(sub-bn Number (bignum ,integer))
-|Decision
-|LetBinding
-|Variable
 
 type Decision =
 |`(if Expr Expr Expr)
@@ -68,14 +86,21 @@ type Variable =
 ;; Expr CEnv -> Listof(ASM)
 (define (compile-e expr env)
   (match expr
-    [(? num? expr) (compile-number expr env)]
-    [(? boolean? expr) (compile-boolean expr)]
+    [(? value? expr) (compile-value expr env)]
     [(? arithmetic? expr) (compile-arithmetic expr env)]
     [(? let-binding? expr) (compile-let-binding expr env)]
     [(? variable? expr) (compile-variable expr env)]
     [(? decision? expr) (compile-decision expr env)]
     [_ (error "Invalid Program")]))
 
+
+;;Compile an value into ASM
+;;Value CEnv-> ASM
+(define (compile-value expr env)
+  (match expr
+    [(? num? expr) (compile-number expr env)]
+    [(? boolean? expr) (compile-boolean expr)]
+    [`(quote ,expr) (compile-list expr env)]))
 
 ;;Compile an arithmetic expression into ASM
 ;;Number CEnv -> ASM
@@ -149,6 +174,45 @@ type Variable =
       ,end
       )))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile List;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;Compile a list value into ASM
+;;List CEnv -> ASM
+(define (compile-list lst env)
+  `(;;Save a pointer to the beginning of the list
+    (mov (offset rsp ,(- (add1 (length env)))) rdi)
+    
+    ;;The previous two positions on the heap have been taken by the first value of the list
+    ;;and a pointer to the rest of the list. Subsequent
+    ;;expressions must use the next free position
+    (add rdi 16) 
+    ,@(compile-list-helper lst env)
+    (mov rax (offset rsp ,(- (add1 (length env)))));;Get the pointer to the beginning of the list
+    (or rax ,type-list) ;;Tag the pointer
+    ))
+
+(define (compile-list-helper lst env)
+  (match lst
+    ['()
+     `((mov rax ,type-empty-list)
+       (mov rbx (offset rsp ,(- (add1 (length env)))))
+       (mov (offset rbx 0) rax))]
+    [(cons h lst)
+     `(,@(compile-e h (extend #f env)) ;;Compile the head of the list
+       ;;Get the pointer to the beginning of the list that was saved on the stack
+       (mov rbx (offset rsp ,(- (add1 (length env)))))
+       ;;Store the list element in the first 8 bytes that was reserved
+       (mov (offset rbx  0) rax)
+       ;;Store a pointer to the rest of the list in the remaining 8 bytes
+       ;;that was reserved. Tag it as a list
+       (mov r15 rdi)
+       (or r15 ,type-list)
+       (mov (offset rbx 1) r15)
+       ;;Save the pointer to the beginning of the rest of the list on the stack
+       (mov (offset rsp ,(- (add1 (length (extend #f env))))) rdi)
+       ;;Reserve the space required to save the next element and a pointer to the rest of the list
+       (add rdi 16)
+       ,@(compile-list-helper lst (extend #f env)) ;;Compile the rest of the list
+       )]))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;:Compile Boolean;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -436,9 +500,17 @@ type Variable =
     [`(if ,a ,b ,c) #t]
     [_ #f]))
 
+;;Determine if the expression is a value
+;;Expr -> boolean
+(define (value? expr)
+  (or (num? expr) (boolean? expr)
+      (match expr
+        [`(quote ,expr ...) #t]
+        [_ #f])))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Tests;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (module+ test
-  ;;Test integers
+  #|;;Test integers
   (check-equal? (execute 5) 5)
   (check-equal? (execute -5) -5)
   
@@ -515,7 +587,13 @@ type Variable =
   (check-equal? (execute `(if (sub-bn (bignum 12345678912345678912345678912345678912345678901234567890123456789123456789012345678901234567890) (bignum 12345678912345678912345678912345678912345678901234567890123456789123456789012345678901234567890)) (add 1 3) (sub 1 2))) 4)
   (check-equal? (execute `(if (let ((var1 1) (var2 (let ((var1 2) (var2 3)) (add var1 var2)))) (sub var2 var1)) 1 2)) 1)
   (check-equal? (execute `(if 0 1 (let ((var1 1) (var2 (let ((var1 2) (var2 3)) (add var1 var2)))) (sub var2 var1)))) 4)
-  (check-equal? (execute `(let ((x (if 1 2 3)) (y (if (add 0 1) 5 6))) (if (sub x y) x y))) 2))
+  (check-equal? (execute `(let ((x (if 1 2 3)) (y (if (add 0 1) 5 6))) (if (sub x y) x y))) 2)|#
+
+  ;;Test list value
+  (check-equal? (execute ''(1 2 3)) '(1 2 3))
+  (check-equal? (execute ''(#t #f #t #f)) '(#t #f #t #f))
+  (check-equal? (execute ''((add 2 3) (sub 1 2))) '(5 -1))
+  (check-equal? (execute ''((bignum 12345678901234567890) (if #t 1 2))) '(12345678901234567890 1))) 
 
 
   

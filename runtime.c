@@ -11,11 +11,15 @@
 #define type_bignum 0b001
 #define type_true 0b010
 #define type_false 0b011
+#define type_empty_list 0b111
+#define type_list  0b100
 
 #define heap_size 10000000
 
 int64_t entry(void* heap);
 void printBignum(int64_t value);
+void printValue(int64_t value);
+void printList(int64_t value);
 int error(void);
 
 /* From this method, the compiled program is initiated by calling the entry function in assembly.
@@ -33,20 +37,9 @@ int main(int argc, char** argv) {
 	/* Entry may either return a 64 bit value via a register or a pointer to a result */
 	int64_t  value = entry(heap);
 	
-	switch(value & result_mask) {
-	case type_integer:
-		printf("%" PRId64 "\n", value >> result_shift);
-		break;
-	case type_bignum:		
-		printBignum(value);	
-		break;
-	case type_true:
-		printf("#t\n");
-		break;
-	case type_false:
-		printf("#f\n");
-		break;	
-	}
+	/* Print the result */
+	printValue(value);
+	printf("\n");
 
 	free(heap);
 	return 0;
@@ -240,6 +233,45 @@ int64_t  subBignum(int64_t arg0, int64_t  arg1, int64_t arg2) {
 	return (len + padding);
 }
 
+/* Print a value */
+void printValue(int64_t value) {
+	switch(value & result_mask) {
+	case type_integer:
+		printf("%" PRId64, value >> result_shift);
+		break;
+	case type_bignum:		
+		printBignum(value);	
+		break;
+	case type_list:
+		printf("( ");
+		printList(value);
+		printf(")");
+		break;
+	case type_empty_list:
+		printf("'()");
+		break;
+	case type_true:
+		printf("#t");
+		break;
+	case type_false:
+		printf("#f");
+		break;	
+	}
+
+}
+
+/* Print a list of values */
+void printList(int64_t value) {
+	int64_t* start_addr = (int64_t *)(value ^ type_list);
+	if(*start_addr != type_empty_list) {
+		printValue(*start_addr);
+		printf(" ");
+		value = *(start_addr + 1);
+		assert((value & result_mask) == type_list);
+		printList(value);
+	}
+}
+
 /* Given a pointer to a bignum string on the heap, print the value of the bignum */
 void printBignum(int64_t value) {
 	int flag; //To hold the result of parsing the return value as a base 10 number.
@@ -260,7 +292,6 @@ void printBignum(int64_t value) {
 	assert(flag == 0); //If the flag is not 0, then the operation failed 	
 
 	mpz_out_str(stdout,10,result);
-	printf("\n");
 }
 
 
