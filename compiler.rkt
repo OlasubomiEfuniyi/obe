@@ -34,6 +34,7 @@ type ListOp =
 type Value =
 |Number
 |Boolean
+|'()
 |List
 
 type List =
@@ -91,6 +92,7 @@ type Variable =
     [(? let-binding? expr) (compile-let-binding expr env)]
     [(? variable? expr) (compile-variable expr env)]
     [(? decision? expr) (compile-decision expr env)]
+    [(? list-op? expr) (compile-list-op expr env)]
     [_ (error "Invalid Program")]))
 
 
@@ -100,6 +102,7 @@ type Variable =
   (match expr
     [(? num? expr) (compile-number expr env)]
     [(? boolean? expr) (compile-boolean expr)]
+    [''() `((mov rax ,type-empty-list))]
     [`(quote ,expr) (compile-list expr env)]))
 
 ;;Compile an arithmetic expression into ASM
@@ -214,6 +217,32 @@ type Variable =
        ,@(compile-list-helper lst (extend #f env)) ;;Compile the rest of the list
        )]))
 
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile ListOp;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;Compile a list operation
+;;Expr CEnv -> ASM
+(define (compile-list-op expr env)
+  (match expr
+    [`(head ,lst) (compile-head lst env)]
+    [`(tail ,lst) (compile-tail lst env)]))
+
+;;Compile the head operation
+(define (compile-head lst env)
+  (let ((c1 (compile-e lst env)))
+    `(,@c1
+      ,@assert-list
+      (xor rax ,type-list);;Untag the pointer
+      (mov rax (offset rax 0)))))
+
+
+;;Compile the tail operation
+(define (compile-tail lst env)
+  (let ((c1 (compile-e lst env)))
+    `(,@c1
+      ,@assert-list
+      (xor rax ,type-list);;Untag the pointer
+      (mov rax (offset rax 1)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;:Compile Boolean;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Compile a boolean into assembly, placing the value in rax
@@ -415,6 +444,12 @@ type Variable =
     (cmp rbx ,type-bignum)
     (jne err)))
 
+;;A variable that holds ASM for confirming that the value in rax is a list
+(define assert-list
+  `((mov rbx rax)
+    (and rbx ,type-mask)
+    (cmp rbx ,type-list)
+    (jne err)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Helper Functions;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Compile a list of expressions
@@ -503,14 +538,22 @@ type Variable =
 ;;Determine if the expression is a value
 ;;Expr -> boolean
 (define (value? expr)
-  (or (num? expr) (boolean? expr)
+  (or (num? expr) (boolean? expr) (equal? expr '())
       (match expr
         [`(quote ,expr ...) #t]
         [_ #f])))
 
+;;Determine if the expression is a list-op
+;;Expr -> boolean
+(define (list-op? expr)
+  (match expr
+    [`(head ,lst) #t]
+    [`(tail ,lst) #t]
+    [_ #f]))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Tests;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (module+ test
-  #|;;Test integers
+  ;;Test integers
   (check-equal? (execute 5) 5)
   (check-equal? (execute -5) -5)
   
@@ -587,14 +630,28 @@ type Variable =
   (check-equal? (execute `(if (sub-bn (bignum 12345678912345678912345678912345678912345678901234567890123456789123456789012345678901234567890) (bignum 12345678912345678912345678912345678912345678901234567890123456789123456789012345678901234567890)) (add 1 3) (sub 1 2))) 4)
   (check-equal? (execute `(if (let ((var1 1) (var2 (let ((var1 2) (var2 3)) (add var1 var2)))) (sub var2 var1)) 1 2)) 1)
   (check-equal? (execute `(if 0 1 (let ((var1 1) (var2 (let ((var1 2) (var2 3)) (add var1 var2)))) (sub var2 var1)))) 4)
-  (check-equal? (execute `(let ((x (if 1 2 3)) (y (if (add 0 1) 5 6))) (if (sub x y) x y))) 2)|#
+  (check-equal? (execute `(let ((x (if 1 2 3)) (y (if (add 0 1) 5 6))) (if (sub x y) x y))) 2)
 
   ;;Test list value
   (check-equal? (execute ''(1 2 3)) '(1 2 3))
   (check-equal? (execute ''(#t #f #t #f)) '(#t #f #t #f))
   (check-equal? (execute ''((add 2 3) (sub 1 2))) '(5 -1))
-  (check-equal? (execute ''((bignum 12345678901234567890) (if #t 1 2))) '(12345678901234567890 1))) 
-
-
+  (check-equal? (execute ''((bignum 12345678901234567890) (if #t 1 2))) '(12345678901234567890 1))
+  (check-equal? (execute ''('(#t #f) 1 2 '(3 4))) '((#t #f) 1 2 (3 4)))
+  (check-equal? (execute ''('('(1) '(2)))) '(((1) (2))))
+  
+  ;;Test head
+  (check-equal? (execute '(head '(1 2 3))) 1)
+  (check-equal? (execute '(head '())) 'err)
+  (check-equal? (execute '(head (head '('(1 5) 2 3)))) 1)
+  (check-equal? (execute '(head '('('(1) '(2))))) '((1) (2)))
+  (check-equal? (execute '(head (if #t '((bignum 1) (add 1 2)) #f))) 1)
+  
+  ;;Test Tail
+  (check-equal? (execute '(tail '(1 2 3))) '(2 3))
+  (check-equal? (execute '(tail '())) 'err)
+  (check-equal? (execute '(tail (tail '('(1 5) 2 3)))) '(3))
+  (check-equal? (execute '(tail '('('(1) '(2))))) '())
+  (check-equal? (execute '(tail (if #t '((bignum 1) (add 1 2)) #f))) '(3))) 
   
 

@@ -248,7 +248,7 @@ void printValue(int64_t value) {
 		printf(")");
 		break;
 	case type_empty_list:
-		printf("'()");
+		printf("()");
 		break;
 	case type_true:
 		printf("#t");
