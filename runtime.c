@@ -13,13 +13,20 @@
 #define type_false 0b011
 #define type_empty_list 0b111
 #define type_list  0b100
+#define type_pair 0b101
 
 #define heap_size 10000000
 
+#define true 1
+#define false 0
+
+typedef char bool;
 int64_t entry(void* heap);
 void printBignum(int64_t value);
 void printValue(int64_t value);
 void printList(int64_t value);
+void printPair(int64_t value);
+
 int error(void);
 
 /* From this method, the compiled program is initiated by calling the entry function in assembly.
@@ -233,7 +240,7 @@ int64_t  subBignum(int64_t arg0, int64_t  arg1, int64_t arg2) {
 	return (len + padding);
 }
 
-/* Print a value */
+/* Print a value. If printEmpty is true, print the empty list symbol, otherwise do not */
 void printValue(int64_t value) {
 	switch(value & result_mask) {
 	case type_integer:
@@ -243,12 +250,17 @@ void printValue(int64_t value) {
 		printBignum(value);	
 		break;
 	case type_list:
-		printf("( ");
+		printf("'(");
 		printList(value);
 		printf(")");
 		break;
+	case type_pair:
+		printf("'(");
+		printPair(value);
+		printf(")");
+		break;
 	case type_empty_list:
-		printf("()");
+		printf("'()");
 		break;
 	case type_true:
 		printf("#t");
@@ -265,11 +277,37 @@ void printList(int64_t value) {
 	int64_t* start_addr = (int64_t *)(value ^ type_list);
 	if(*start_addr != type_empty_list) {
 		printValue(*start_addr);
-		printf(" ");
 		value = *(start_addr + 1);
 		assert((value & result_mask) == type_list);
+		//Print a space if the next thing to print is not the empty list
+		if((*((int64_t* )(value ^ type_list)) & result_mask) != type_empty_list) {
+			printf(" ");
+		}
 		printList(value);
 	}
+}
+
+/* Print a pair of values */
+void  printPair(int64_t value) {
+	int64_t* start_addr  = (int64_t *)(value ^ type_pair);
+
+		printValue(*start_addr);
+		value = *(start_addr + 1);
+
+		//Check if the next value is another pair or the final value in
+		//a chain of pairs
+		if((value & result_mask) == type_empty_list) {
+			//Do nothing
+		}
+		else if((value & result_mask) == type_pair) {
+			printf(" ");
+			printPair(value);
+		} else {
+			printf(" . ");
+			printValue(value);
+		}
+	
+
 }
 
 /* Given a pointer to a bignum string on the heap, print the value of the bignum */

@@ -18,7 +18,7 @@
                 (with-input-from-file "result"
                   (λ ()
                     ;;Read the result
-                    (let ((res (read)))
+                    (let ((res (read-string)))
                       ;;Try to delete the temporary result file
                       (if (system "rm result make-output")
                           res

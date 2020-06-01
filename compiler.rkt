@@ -13,6 +13,7 @@
 (define type-false #b011)
 (define type-empty-list #b111)
 (define type-list #b100)
+(define type-pair #b101)
 
 
 #|
@@ -31,6 +32,10 @@ type ListOp =
 |`(head List)
 |`(tail List)
 
+type PairOp =
+|`(first Pair)
+|`(second Pair)
+
 type Value =
 |Number
 |Boolean
@@ -39,6 +44,9 @@ type Value =
 
 type List =
 |``(Expr*)
+
+type Pair =
+|(cons Expr Expr)
 
 type Arithmetic =
 |`(add ,Number ,Number)
@@ -93,6 +101,7 @@ type Variable =
     [(? variable? expr) (compile-variable expr env)]
     [(? decision? expr) (compile-decision expr env)]
     [(? list-op? expr) (compile-list-op expr env)]
+    [(? pair-op? expr) (compile-pair-op expr env)]
     [_ (error "Invalid Program")]))
 
 
@@ -103,7 +112,8 @@ type Variable =
     [(? num? expr) (compile-number expr env)]
     [(? boolean? expr) (compile-boolean expr)]
     [''() `((mov rax ,type-empty-list))]
-    [`(quote ,expr) (compile-list expr env)]))
+    [`(quote ,expr) (compile-list expr env)]
+    [`(cons ,e1 ,e2) (compile-pair e1 e2 env)]))
 
 ;;Compile an arithmetic expression into ASM
 ;;Number CEnv -> ASM
@@ -178,7 +188,7 @@ type Variable =
       )))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile List;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;Compile a list value into ASM
+;;Compile a list value into ASM. A list compiled this way is considered a different value from a list created with cons
 ;;List CEnv -> ASM
 (define (compile-list lst env)
   `(;;Save a pointer to the beginning of the list
@@ -244,6 +254,53 @@ type Variable =
       (xor rax ,type-list);;Untag the pointer
       (mov rax (offset rax 1)))))
 
+
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile Pair;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;Compile a cons operation
+;;Expr Expr CEnv -> ASM
+(define (compile-pair e1 e2 env)
+  (let ((c1 (compile-e e1 env))
+        (c2 (compile-e e2 (extend #f env))))
+    `(,@c1
+      (mov (offset rsp ,(- (add1 (length env)))) rax);;Save the result of evaluating the first expression on the stack
+      ,@c2
+      (mov rbx (offset rsp ,(- (add1 (length env)))))
+      (mov (offset rdi 0) rbx) ;;Move the first value on the heap
+      (mov (offset rdi 1) rax) ;;Move the second value on the heap
+      (mov rax rdi) ;;Save a pointer to the beginning of the pair
+      (or rax ,type-pair);;Tag the pointer
+      (add rdi 16)))) ;;Make rdi contain the address of the next free location on the heap
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;:Compile Pair-op;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;Compile a pair operation
+;;Pair-Op CEnv -> ASM
+(define (compile-pair-op expr env)
+  (match expr
+    [`(first ,expr) (compile-first expr env)]
+    [`(second ,expr) (compile-second expr env)]))
+
+;;Compile first operation on a pair
+;;Expr CEnv -> ASM
+(define (compile-first expr env)
+  `(,@(compile-e expr env)
+    ,@assert-pair
+    ;;Untag the address
+    (xor rax ,type-pair)
+    (mov rax (offset rax 0))))
+
+;;Compile second operation on a pair
+;;Expr CEnv -> ASM
+(define (compile-second expr env)
+  `(,@(compile-e expr env)
+    ,@assert-pair
+    ;;Untag the address
+    (xor rax ,type-pair)
+    (mov rax (offset rax 1))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;:Compile Boolean;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Compile a boolean into assembly, placing the value in rax
 ;;Boolean -> ASM
@@ -451,6 +508,13 @@ type Variable =
     (cmp rbx ,type-list)
     (jne err)))
 
+;;A variable that holds ASM for confirming that the value in rax is a pair
+(define assert-pair
+  `((mov rbx rax)
+    (and rbx ,type-mask)
+    (cmp rbx ,type-pair)
+    (jne err)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Helper Functions;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Compile a list of expressions
 ;;Listof(Expr) CEnv -> ASM
@@ -541,6 +605,7 @@ type Variable =
   (or (num? expr) (boolean? expr) (equal? expr '())
       (match expr
         [`(quote ,expr ...) #t]
+        [`(cons ,e1 ,e2) #t]
         [_ #f])))
 
 ;;Determine if the expression is a list-op
@@ -551,9 +616,17 @@ type Variable =
     [`(tail ,lst) #t]
     [_ #f]))
 
+;;Determine if the expression is a pair-op
+;;Expr -> boolean
+(define (pair-op? expr)
+  (match expr
+    [`(first ,pair) #t]
+    [`(second ,pair) #t]
+    [_ #f]))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Tests;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (module+ test
-  ;;Test integers
+  #|;;Test integers
   (check-equal? (execute 5) 5)
   (check-equal? (execute -5) -5)
   
@@ -652,6 +725,37 @@ type Variable =
   (check-equal? (execute '(tail '())) 'err)
   (check-equal? (execute '(tail (tail '('(1 5) 2 3)))) '(3))
   (check-equal? (execute '(tail '('('(1) '(2))))) '())
-  (check-equal? (execute '(tail (if #t '((bignum 1) (add 1 2)) #f))) '(3))) 
+  (check-equal? (execute '(tail (if #t '((bignum 1) (add 1 2)) #f))) '(3))|#
+
+  ;;Test Pair
+  (check-equal? (execute '(cons #t #f)) '(#t . #f))
+  (check-equal? (execute '(cons #t (cons #f #t))) '(#t #f . #t))
+  (check-equal? (execute '(cons #t (cons #f '(1)))) '(#t #f . '(1))) ;;Mixing a list and a pair does not morph into a list
+  (check-equal? (execute '(cons 1 (cons #t (cons 3 (cons #f '()))))) '(1 #t 3 #f . '())) ;;The empty list is just another value in the pair
+                
+
+
+  ;;Test Pair operations
+  (check-equal? (execute '(first (cons #t #f))) #t)
+  (check-equal? (execute '(second (cons #t #f))) #f)
+
+  (let ((lst '(cons 2 (cons 1 '()))))
+    (check-equal? (execute `(first ,lst)) 2)
+    (check-equal? (execute `(first (second ,lst))) 1)
+    (check-equal? (execute `(second (second ,lst))) '())
+    (check-equal? (execute `(second (second (second ,lst)))) 'err))
+
+  (let ((pair '(cons (add 1 2) (cons (add 1 1) (sub 1 0)))))
+    (check-equal? (execute `(first ,pair)) 3)
+    (check-equal? (execute `(first (first ,pair))) 'err)
+    (check-equal? (execute `(first (second ,pair))) '2)
+    (check-equal? (execute `(first (second (second ,pair)))) 'err))
+
+  (let ((lp '(cons #t '(1 2 3))))
+    (check-equal? (execute `(first ,lp)) #t)
+    (check-equal? (execute `(second ,lp)) '(1 2 3))
+    (check-equal? (execute `(first (second ,lp))) 'err) ;;List and pairs are different types of values with different operations
+    (check-equal? (execute `(head (second ,lp))) 1)
+    (check-equal? (execute `(tail (second ,lp))) '(2 3))))
   
 
