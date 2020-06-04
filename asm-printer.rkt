@@ -58,12 +58,15 @@ type Register
 
 |#
 
-(provide asm->assembly)
+(provide assembly)
 
 (module+ test
   (require rackunit))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Assembly conversion functions;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;Conver a list of ASM to assembly string
+(define (assembly compiled-prog)
+  (string-append "\tglobal entry\n \textern error\n \textern addBignum\n \textern subBignum\n \textern rotateString\n \tsection .text\n entry:\n \tpush rbp\n \tmov rbp, rsp\n \tpush rbx\n \tpush rdi\n \tpush rsi\n" (asm->assembly compiled-prog)))
+
+;;Conver a list of ASM to assembly strin
 ;;Listof(ASM) -> string
 (define (asm->assembly lst)
   (match lst
