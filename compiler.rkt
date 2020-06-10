@@ -165,15 +165,19 @@ type Variable =
      `(,@(compile-e expr (append (make-list (length new-env) #f) env))
       ,@assert-pair ;;This binding syntax is only valid for pairs
       (xor rax ,type-pair) ;;Untag the value
-      (mov (offset rsp ,(- (+ 1 (length env) (length new-env)))) (offset rax 0)) ;;Place the head value on the stack first
-      (mov (offset rsp ,(- (+ 2 (length env) (length new-env)))) (offset rax 1)) ;;Place the tail value on the stack
+      (mov rbx (offset rax 0))
+      (mov (offset rsp ,(- (+ 1 (length env) (length new-env)))) rbx) ;;Place the head value on the stack first
+      (mov rbx (offset rax 1))
+      (mov (offset rsp ,(- (+ 2 (length env) (length new-env)))) rbx) ;;Place the tail value on the stack
       ,@(compile-let '() exps env (cons x2 (cons x1 new-env))))] ;;Compile the rest of the list of bindings
     [(cons `(,(? symbol? x1) ,(? symbol? x2) ,expr) rest)
      `(,@(compile-e expr (append (make-list (length new-env) #f) env))
       ,@assert-pair ;;This binding syntax is only valid for pairs
       (xor rax ,type-pair) ;;Untag the value
-      (mov (offset rsp ,(+ 1 (length env) (length new-env))) (offset rax 0)) ;;Place the head value on the stack first
-      (mov (offset rsp ,(- (+ 2 (length env) (length new-env)))) (offset rax 1)) ;;Place the tail value on the stack
+      (mov rbx (offset rax 0))
+      (mov (offset rsp ,(+ 1 (length env) (length new-env))) rbx) ;;Place the head value on the stack first
+      (mov rbx (offset rax 1))
+      (mov (offset rsp ,(- (+ 2 (length env) (length new-env)))) rbx) ;;Place the tail value on the stack
       ,@(compile-let rest exps env (cons x2 (cons x1 new-env))))] ;;Compile the rest of the list of bindings
     ['()
      `(,@(compile-es exps (append new-env env)))] ;;Compile each expression that makes up the body of the let expression under the environment created by the bindings
@@ -709,7 +713,7 @@ type Variable =
   (check-equal? (execute (compile `(add-bn (sub-bn (bignum 1) (bignum 10)) 19))) 10)
   (check-equal? (execute (compile `(sub-bn (sub 6 1) (bignum 5)))) 0)
 
-  ;;Test let
+  ;;Test let without pattern matching
   (check-equal? (execute (compile `(let () 5))) 5)
   (check-equal? (execute (compile `(let ((x 5)) x))) 5)
   (check-equal? (execute (compile `(let ((a 1) (b (bignum 2))) b))) 2)
@@ -726,6 +730,17 @@ type Variable =
   (check-equal? (execute (compile `(let ((length (add 2 3)) (breadth (sub-bn (add-bn 1 (bignum 10)) (sub-bn (bignum 8) 2))) (height (sub 6 1))) (add-bn (add-bn length breadth) height)
                             (add length length) (sub-bn length breadth) (let ((f-dim (add-bn length breadth))) length f-dim)))) 10)
 
+  ;;Test let with pattern matching
+  (check-equal? (execute (compile `(let ((x y (cons 1 2))) (add x y)))) 3)
+  (check-equal? (execute (compile `(let ((x y (cons 1 '()))) (cons 2 y)))) ''(2))
+  (check-equal? (execute (compile `(let ((lst '(1 2 3 4 5))) (let ((h t lst)) t)))) 'err)
+  (check-equal? (execute (compile `(let ((h t (add 1 2))) h))) 'err)
+  (check-equal? (execute (compile `(let ((lst (cons 1 (cons 2 (cons 3 (cons 4 '())))))) (let ((h t (tail lst))) t)))) 'err)
+  (check-equal? (execute (compile `(let ((lst (cons 1 (cons 2 (cons 3 (cons 4 '())))))) (let ((h t (second lst))) t)))) ''(3 4))
+  (check-equal? (execute (compile `(let ((var1 (bignum 1234)) (x y (cons 1 2))) (add-bn var1 x)))) 1235)
+  (check-equal? (execute (compile `(let ((x y (cons 1 2)) (var1 (bignum 1234))) (add-bn var1 x)))) 1235)
+  (check-equal? (execute (compile `(let ((var1 1) (var2 #t) (var3 var4 (cons 1 (cons 2 (cons 3 4))))) (if var2 (add (add var1 var3) (first var4)) 0)))) 4)
+   
   ;;Test booleans
   (check-equal? (execute (compile `#t)) #t)
   (check-equal? (execute (compile `#f)) #f)
