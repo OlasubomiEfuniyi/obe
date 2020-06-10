@@ -68,8 +68,9 @@ type Number =
 type LetBinding =
 | `(let (Binding*) Expr+)
 
-type Binracketding =
+type Binding =
 |`(Variable Expr)
+|`(Variable Variable Pair)
 
 type Variable =
 |Symbol
@@ -136,17 +137,47 @@ type Variable =
 ;;LetBinding CEnv -> ASM
 (define (compile-let-binding expr env)
   (match expr
-    [`(let ((,(? symbol? xs) ,es) ...) ,exps ..1) (compile-let xs es exps env)]))
+    [`(let (,(? binding? bs) ...) ,exps ..1) (compile-let bs exps env '())]))
+
 
 ;;Compile a let binding going from left to right
-(define (compile-let xs es exps env)
-  (let ((ces (compile-es es env)))
-    `(,@ces
-      ;;xs is reversed so that the order of the variable names corresponds to
-      ;;how they were placed on the stack
-      ,@(compile-es exps (append (reverse xs) env)) 
-      )))
- 
+;;ListOf(Bindings) ListOf(Expr) CEnv -> ASM
+
+(define (compile-let bs exps env new-env)
+  (match bs
+    ;;Dealing with a simple binding of a value to a variable name
+    [(cons `(,(? symbol? x) ,expr) '()) ;;When we reach the last binding, no need to reserve space on the stack
+     `(;;Compile the head of the list of bindings. We do not want the expression
+       ;;to have a notion of the bindings that have been compiled as part of the
+       ;;current let, yet we want it to take the space they will fill up
+       ;;into account. So, we append enough #f values to block off the
+       ;;space required. This is also done in the similar cases below.
+       ,@(compile-e expr (append (make-list (length new-env) #f) env)) 
+       (mov (offset rsp ,(- (+ 1 (length env) (length new-env)))) rax) ;;Save the result on the stack
+       ,@(compile-let '() exps env (cons x new-env)) ;;Compile the rest of the list of bindings
+       )]
+    [(cons `(,(? symbol? x) ,expr) rest)
+     `(,@(compile-e expr (append (make-list (length new-env) #f) env)) ;;Compile the head of the list of bindings
+       (mov (offset rsp ,(- (+ 1 (length env) (length new-env)))) rax) ;;Save the result on the stack
+       ,@(compile-let rest exps env (cons x new-env)) ;;Compile the rest of the list of bindings
+       )]
+    [(cons `(,(? symbol? x1) ,(? symbol? x2) ,expr) '())
+     `(,@(compile-e expr (append (make-list (length new-env) #f) env))
+      ,@assert-pair ;;This binding syntax is only valid for pairs
+      (xor rax ,type-pair) ;;Untag the value
+      (mov (offset rsp ,(- (+ 1 (length env) (length new-env)))) (offset rax 0)) ;;Place the head value on the stack first
+      (mov (offset rsp ,(- (+ 2 (length env) (length new-env)))) (offset rax 1)) ;;Place the tail value on the stack
+      ,@(compile-let '() exps env (cons x2 (cons x1 new-env))))] ;;Compile the rest of the list of bindings
+    [(cons `(,(? symbol? x1) ,(? symbol? x2) ,expr) rest)
+     `(,@(compile-e expr (append (make-list (length new-env) #f) env))
+      ,@assert-pair ;;This binding syntax is only valid for pairs
+      (xor rax ,type-pair) ;;Untag the value
+      (mov (offset rsp ,(+ 1 (length env) (length new-env))) (offset rax 0)) ;;Place the head value on the stack first
+      (mov (offset rsp ,(- (+ 2 (length env) (length new-env)))) (offset rax 1)) ;;Place the tail value on the stack
+      ,@(compile-let rest exps env (cons x2 (cons x1 new-env))))] ;;Compile the rest of the list of bindings
+    ['()
+     `(,@(compile-es exps (append new-env env)))] ;;Compile each expression that makes up the body of the let expression under the environment created by the bindings
+     ))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile Variable;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Compile a variable
@@ -584,7 +615,14 @@ type Variable =
 ;;Expr -> boolean
 (define (let-binding? expr)
   (match expr
-    [`(let ((,(? symbol?) ,r1) ...) ,e ..1) #t]
+    [`(let (,(? binding?) ...) ,e ..1) #t]
+    [_ #f]))
+
+;;Determine if a subexpression is a binding
+(define (binding? expr)
+  (match expr
+    [`(,(? symbol?) ,r1) #t]
+    [`(,(? symbol?) ,(? symbol?) ,r1) #t]
     [_ #f]))
 
 ;;Determine if the expression is a variable
