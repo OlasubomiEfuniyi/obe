@@ -26,6 +26,7 @@ type Expr =
 |LetBinding
 |Variable
 |ListOp
+|PairOp
 
 
 type ListOp =
@@ -77,10 +78,79 @@ type Variable =
 
 |#
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Desugar;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;Change a list literal to a sequence of cons ending with the empty list. E.g '(1 2) <=> (cons 1 (cons 2 '()))
+;;Expr -> Expr
+(define (desugar expr)
+  (match expr
+    [(? value? expr) (desugar-value expr)]
+    [(? arithmetic? expr) (desugar-arithmetic expr)]
+    [(? let-binding? expr) (desugar-let-binding expr)]
+    [(? variable? expr) expr]
+    [(? decision? expr) (desugar-decision expr)]
+    [(? list-op? expr) (desugar-list-op expr)]
+    [(? pair-op? expr) (desugar-pair-op expr)]
+    [_ (error "Invalid Program")]))
+
+;;Desugar a value
+;;Value -> Value
+(define (desugar-value expr)
+  (match expr
+    [(? num? n) n]
+    [(? boolean? b) b]
+    [''() ''()]
+    [`(quote ,lst) (list-literal-to-cons `,lst)]
+    [`(cons ,e1 ,e2) `(cons ,(desugar e1) ,(desugar e2))]))
+
+;;Desugar an arithmetic operation
+;;Arithmetic -> Arithmetic
+(define (desugar-arithmetic expr)
+   (match expr
+    [`(add ,e1 ,e2) `(add ,(desugar e1) ,(desugar e2))]
+    [`(sub ,e1 ,e2) `(sub ,(desugar e1) ,(desugar e2))]
+    [`(add-bn ,e1 ,e2) `(add-bn ,(desugar e1) ,(desugar e2))]
+    [`(sub-bn ,e1 ,e2) `(sub-bn ,(desugar e1) ,(desugar e2))]))
+
+;;Desugar a let binding
+;;LetBinding -> LetBinding
+(define (desugar-let-binding expr)
+  (match expr
+    [`(let (,(? binding? bs) ...) ,exps ..1) `(let (,@(map (match-lambda 
+                                                             [`(,(? symbol? s) ,r1) `(,s ,(desugar r1))]
+                                                             [`(,(? symbol? s1) ,(? symbol? s2) ,r1) `(,s1 ,s2 ,(desugar r1))]
+                                                             [_ (error "Illegal binding")]) bs)) ,@(map desugar exps))]))
+;;Desugar a pair operation
+;;PairOp- -> PairOp
+(define (desugar-pair-op expr)
+  (match expr
+    [`(first ,expr) `(first ,(desugar expr))]
+    [`(second ,expr) `(second ,(desugar expr))]))
+
+;;Desugar a list operation
+;;ListOp -> ListOp
+(define (desugar-list-op expr)
+  (match expr
+    [`(head ,lst) `(head ,(desugar lst))]
+    [`(tail ,lst) `(tail ,(desugar lst))]))
+
+;;Desugar a decision
+;;Decision -> Decision
+(define (desugar-decision expr)
+  (match expr
+    [`(if ,e1 ,e2 ,e3) `(if ,(desugar e1) ,(desugar e2) ,(desugar e3))]))
+
+
+(define (list-literal-to-cons lst)
+  (match lst
+    ['() '()]
+    [(cons h t) `(cons ,h ,(list-literal-to-cons t))]
+    [_ (display lst)]))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Top level compile;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Entry compile function
 ;;Expr -> ASM
 (define (compile expr)
-  `(,@(compile-e expr '()) ;;Start with empty environment
+  `(,@(compile-e (desugar expr) '()) ;;Start with empty environment
     ;;Since rsp is never moved beyond the initial stack fram setup, this sould revert the setup
     (pop rsi)
     (pop rdi)
@@ -113,7 +183,6 @@ type Variable =
     [(? num? expr) (compile-number expr env)]
     [(? boolean? expr) (compile-boolean expr)]
     [''() `((mov rax ,type-empty-list))]
-    [`(quote ,expr) (compile-list expr env)]
     [`(cons ,e1 ,e2) (compile-pair e1 e2 env)]))
 
 ;;Compile an arithmetic expression into ASM
@@ -162,23 +231,43 @@ type Variable =
        ,@(compile-let rest exps env (cons x new-env)) ;;Compile the rest of the list of bindings
        )]
     [(cons `(,(? symbol? x1) ,(? symbol? x2) ,expr) '())
+     (let ((untag-pair (gensym "untag"))
+           (continue (gensym "continue")))
      `(,@(compile-e expr (append (make-list (length new-env) #f) env))
-      ,@assert-pair ;;This binding syntax is only valid for pairs
+      ,@assert-pair-list ;;This binding syntax is only valid for pairs
+      (mov rbx rax)
+      (and rbx ,type-mask)
+      (cmp rbx ,type-pair)
+      (je ,untag-pair)
+      (xor rbx ,type-list)
+      (jmp ,continue)
+      ,untag-pair
       (xor rax ,type-pair) ;;Untag the value
-      (mov rbx (offset rax 0))
-      (mov (offset rsp ,(- (+ 1 (length env) (length new-env)))) rbx) ;;Place the head value on the stack first
-      (mov rbx (offset rax 1))
-      (mov (offset rsp ,(- (+ 2 (length env) (length new-env)))) rbx) ;;Place the tail value on the stack
-      ,@(compile-let '() exps env (cons x2 (cons x1 new-env))))] ;;Compile the rest of the list of bindings
-    [(cons `(,(? symbol? x1) ,(? symbol? x2) ,expr) rest)
-     `(,@(compile-e expr (append (make-list (length new-env) #f) env))
-      ,@assert-pair ;;This binding syntax is only valid for pairs
-      (xor rax ,type-pair) ;;Untag the value
+      ,continue
       (mov rbx (offset rax 0))
       (mov (offset rsp ,(+ 1 (length env) (length new-env))) rbx) ;;Place the head value on the stack first
       (mov rbx (offset rax 1))
       (mov (offset rsp ,(- (+ 2 (length env) (length new-env)))) rbx) ;;Place the tail value on the stack
-      ,@(compile-let rest exps env (cons x2 (cons x1 new-env))))] ;;Compile the rest of the list of bindings
+      ,@(compile-let '() exps env (cons x2 (cons x1 new-env)))))] ;;Compile the rest of the list of bindings
+    [(cons `(,(? symbol? x1) ,(? symbol? x2) ,expr) rest)
+     (let ((untag-pair "untag-pair")
+           (continue "continue"))
+     `(,@(compile-e expr (append (make-list (length new-env) #f) env))
+      ,@assert-pair-list ;;This binding syntax is only valid for pairs
+      (mov rbx rax)
+      (and rbx ,type-mask)
+      (cmp rbx ,type-pair)
+      (je ,untag-pair)
+      (xor rbx ,type-list)
+      (jmp ,continue)
+      ,untag-pair
+      (xor rax ,type-pair) ;;Untag the value
+      ,continue
+      (mov rbx (offset rax 0))
+      (mov (offset rsp ,(+ 1 (length env) (length new-env))) rbx) ;;Place the head value on the stack first
+      (mov rbx (offset rax 1))
+      (mov (offset rsp ,(- (+ 2 (length env) (length new-env)))) rbx) ;;Place the tail value on the stack
+      ,@(compile-let rest exps env (cons x2 (cons x1 new-env)))))] ;;Compile the rest of the list of bindings
     ['()
      `(,@(compile-es exps (append new-env env)))] ;;Compile each expression that makes up the body of the let expression under the environment created by the bindings
      ))
@@ -222,48 +311,6 @@ type Variable =
       ,end
       )))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile List;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;Compile a list value into ASM. A list compiled this way is considered a different value from a list created with cons
-;;List CEnv -> ASM
-(define (compile-list lst env)
-  `(;;Save a pointer to the beginning of the list
-    (mov (offset rsp ,(- (add1 (length env)))) rdi)
-    
-    ;;The previous two positions on the heap have been taken by the first value of the list
-    ;;and a pointer to the rest of the list. Subsequent
-    ;;expressions must use the next free position
-    (add rdi 16) 
-    ,@(compile-list-helper lst env)
-    (mov rax (offset rsp ,(- (add1 (length env)))));;Get the pointer to the beginning of the list
-    (or rax ,type-list) ;;Tag the pointer
-    ))
-
-(define (compile-list-helper lst env)
-  (match lst
-    ['()
-     `((mov rax ,type-empty-list)
-       (mov rbx (offset rsp ,(- (add1 (length env)))))
-       (mov (offset rbx 0) rax))]
-    [(cons h lst)
-     `(,@(compile-e h (extend #f env)) ;;Compile the head of the list
-       ;;Get the pointer to the beginning of the list that was saved on the stack
-       (mov rbx (offset rsp ,(- (add1 (length env)))))
-       ;;Store the list element in the first 8 bytes that was reserved
-       (mov (offset rbx  0) rax)
-       ;;Store a pointer to the rest of the list in the remaining 8 bytes
-       ;;that was reserved. Tag it as a list
-       (mov r15 rdi)
-       (or r15 ,type-list)
-       (mov (offset rbx 1) r15)
-       ;;Save the pointer to the beginning of the rest of the list on the stack
-       (mov (offset rsp ,(- (add1 (length (extend #f env))))) rdi)
-       ;;Reserve the space required to save the next element and a pointer to the rest of the list
-       (add rdi 16)
-       ,@(compile-list-helper lst (extend #f env)) ;;Compile the rest of the list
-       )]))
-
-
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile ListOp;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Compile a list operation
 ;;Expr CEnv -> ASM
@@ -298,15 +345,28 @@ type Variable =
 ;;Expr Expr CEnv -> ASM
 (define (compile-pair e1 e2 env)
   (let ((c1 (compile-e e1 env))
-        (c2 (compile-e e2 (extend #f env))))
+        (c2 (compile-e e2 (extend #f env)))
+        (list (gensym "list"))
+        (end (gensym "end")))
     `(,@c1
       (mov (offset rsp ,(- (add1 (length env)))) rax);;Save the result of evaluating the first expression on the stack
       ,@c2
       (mov rbx (offset rsp ,(- (add1 (length env)))))
       (mov (offset rdi 0) rbx) ;;Move the first value on the heap
       (mov (offset rdi 1) rax) ;;Move the second value on the heap
+      (mov rbx rax) ;;Save the second value for use later. Make sure it is not overwritten before it is used
       (mov rax rdi) ;;Save a pointer to the beginning of the pair
-      (or rax ,type-pair);;Tag the pointer
+      ;;Determine if this is a list or just a pair. It is a list of the second operand is a list or the empty list
+      (cmp rbx ,type-empty-list)
+      (je ,list)
+      (and rbx ,type-mask)
+      (cmp rbx ,type-list)
+      (je ,list)
+      (or rax ,type-pair);;Tag the pointer as a pair
+      (jmp ,end)
+      ,list
+      (or rax ,type-list);;Tag the pointer as a list
+      ,end
       (add rdi 16)))) ;;Make rdi contain the address of the next free location on the heap
 
 
@@ -550,6 +610,17 @@ type Variable =
     (cmp rbx ,type-pair)
     (jne err)))
 
+;;A variable that holds ASM for confirming that the value in rax is a pair or a list
+(define assert-pair-list
+  (let ((end (gensym "end")))
+    `((mov rbx rax)
+      (and rbx ,type-mask)
+      (cmp rbx ,type-pair)
+      (je ,end)
+      (cmp rbx ,type-list)
+      (jne err)
+      ,end)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Helper Functions;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Compile a list of expressions
 ;;Listof(Expr) CEnv -> ASM
@@ -596,7 +667,7 @@ type Variable =
   (let ((t (member v env)))
     (if t
         (sub1 (length t))
-        (error (string-append "Variable " (symbol->string v) "not in scope")))))
+        (error (string-append "Variable " (symbol->string v) " not in scope")))))
 
                       
 
