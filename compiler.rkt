@@ -50,10 +50,8 @@ type Pair =
 |(cons Expr Expr)
 
 type Arithmetic =
-|`(add ,Number ,Number)
-|`(sub ,Number ,Number)
-|`(add-bn (bignum ,integer) Number) | `(add-bn Number (bignum ,integer))
-|`(sub-bn (bignum ,integer) Number) | `(sub-bn Number (bignum ,integer))
+|`(add integer integer)
+|`(sub integer integer)
 
 type Decision =
 |`(if Expr Expr Expr)
@@ -107,9 +105,7 @@ type Variable =
 (define (desugar-arithmetic expr)
    (match expr
     [`(add ,e1 ,e2) `(add ,(desugar e1) ,(desugar e2))]
-    [`(sub ,e1 ,e2) `(sub ,(desugar e1) ,(desugar e2))]
-    [`(add-bn ,e1 ,e2) `(add-bn ,(desugar e1) ,(desugar e2))]
-    [`(sub-bn ,e1 ,e2) `(sub-bn ,(desugar e1) ,(desugar e2))]))
+    [`(sub ,e1 ,e2) `(sub ,(desugar e1) ,(desugar e2))]))
 
 ;;Desugar a let binding
 ;;LetBinding -> LetBinding
@@ -190,16 +186,14 @@ type Variable =
 (define (compile-arithmetic expr env)
   (match expr
     [`(add ,e1 ,e2) (compile-add e1 e2 env)]
-    [`(sub ,e1 ,e2) (compile-sub e1 e2 env)]
-    [`(add-bn ,e1 ,e2) (compile-add-bn e1 e2 env)]
-    [`(sub-bn ,e1 ,e2) (compile-sub-bn e1 e2 env)]))
+    [`(sub ,e1 ,e2) (compile-sub e1 e2 env)]))
 
 ;;Compile a Number value into ASM
 ;;Number CEnv -> ASM
 (define (compile-number expr env)
   (match expr
-    [(? integer? expr) (compile-integer expr)]
-    [`(bignum ,e1) (compile-bignum e1 env)]))
+    ;;Every integer is treated as a bignum
+    [(? integer? num) (compile-bignum num)]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;:::::Compile LetBinding;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Compile a let binding
@@ -425,13 +419,6 @@ type Variable =
   `((mov rax ,(if b type-true type-false))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile Number;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;Compile an integer into assembly, placing the value in rax
-;;Expr -> ASM
-(define (compile-integer i)
-  ;;Integers are tagged with a 0 as the least significant bit. This means the biggest integer that can be represented is
-  ;;2^62 - 1 without using bignums
-  `((mov rax ,(arithmetic-shift i shift))))
-
 ;:Compile an integer into assebmly, placing the value on the heap alongside how many bytes it takes up
 ;;Note: Racket allows arbitrary precision for its integer values
 ;;Expr CEnv -> ASM
@@ -460,43 +447,9 @@ type Variable =
       (or rax ,type-bignum))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;:::::::::::Compile Arithmetic Operations;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;Compile the addition of two expressions
-;;Expr Expr CEnv -> ASM
-(define (compile-add e1 e2 env)
-  (let ((c1 (compile-e e1 env))
-        (c2 (compile-e e2 (extend #f env))))
-    `(,@c1
-      ,@assert-integer
-      (mov (offset rsp ,(- (add1 (length env)))) rax) ;;Save the result of evaluating the first expression on the stack
-      ,@c2
-      ,@assert-integer
-      ;;Add the result of evaluating the first expression to the result
-      ;;of evaluating the second expression
-      (add rax (offset rsp ,(- (add1 (length env))))))))
-
-;;Compile the subtraction of two expressions
-;;Expr Expr CEnv -> ASM
-(define (compile-sub e1 e2 env)
-  (let ((c1 (compile-e e1 env))
-        (c2 (compile-e e2 (extend #f env))))
-    `(,@c1
-      ,@assert-integer
-      ;;Save the result of evaluating the first expression on the stack
-      (mov (offset rsp ,(- (add1 (length env)))) rax)
-      
-      ,@c2
-      ,@assert-integer
-
-      ;;Get the result of evaluating the first expression
-      (mov rbx (offset rsp ,(- (add1 (length env)))))
-      (sub rbx rax)
-      (mov rax rbx)
-      ;;Tag the result as an integer
-      (or rax ,type-integer))))
-
 ;;Compile the addition of two big nums
 ;;Expr Expr CEnv-> ASM
-(define (compile-add-bn e1 e2 env)
+(define (compile-add e1 e2 env)
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
         (stack-size (* 8 (+ 4 (length env)))))
@@ -551,7 +504,7 @@ type Variable =
 
 ;;Compile the subtraction of two bignums
 ;;Expr Expr CEnv-> ASM
-(define (compile-sub-bn e1 e2 env)
+(define (compile-sub e1 e2 env)
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
         (stack-size (* 8 (+ 4 (length env)))))
@@ -698,14 +651,13 @@ type Variable =
 (define (num? expr)
   (match expr
     [(? integer?) #t]
-    [`(bignum ,n) #t]
     [_ #f]))
 
 ;;Determine if the expression is an arithmetic operation
 ;;Expr -> boolean
 (define (arithmetic? expr)
   (match expr
-    [(list (or 'add 'sub 'add-bn 'sub-bn) e1 e2) #t]
+    [(list (or 'add 'sub) e1 e2) #t]
     [_ #f]))
 
 ;;Determine if the expression is a let binding
@@ -832,8 +784,14 @@ type Variable =
   (check-equal? (execute (compile `(let ((lst (cons 1 (cons 2 (cons 3 (cons 4 '())))))) (let ((h t (second lst))) t)))) ''(3 4))
   (check-equal? (execute (compile `(let ((var1 (bignum 1234)) (x y (cons 1 2))) (add-bn var1 x)))) 1235)
   (check-equal? (execute (compile `(let ((x y (cons 1 2)) (var1 (bignum 1234))) (add-bn var1 x)))) 1235)
-  ;;(check-equal? (execute (compile `(let ((var1 1) (var2 #t) (var3 var4 (cons 1 (cons 2 (cons 3 4))))) (if var2 (add (add var1 var3) (first var4)) 0)))) 4)
-   
+  (check-equal? (execute (compile `(let ((var1 1) (var2 #t) (var3 var4 (cons 1 (cons 2 (cons 3 4))))) (if var2 (add (add var1 var3) (first var4)) 0)))) 4)
+  (check-equal? (execute (compile `(let ((a b '(1 2 3 4))) (let ((c d b)) (let ((e f d)) (add (add a c) e)))))) 6)
+  (check-equal? (execute (compile `(let ((myList (cons 1 (cons 2 '()))))
+                                     (if (head myList)
+                                         (let ((h t myList))
+                                           t)
+                                           #f)))) ''(2))
+  
   ;;Test booleans
   (check-equal? (execute (compile `#t)) #t)
   (check-equal? (execute (compile `#f)) #f)
