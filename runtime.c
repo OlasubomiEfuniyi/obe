@@ -28,6 +28,7 @@ void printList(int64_t value);
 void printPair(int64_t value);
 
 int error(void);
+int runtimeSystemError(void);
 
 /* From this method, the compiled program is initiated by calling the entry function in assembly.
 The entry function is linked with this RTS 
@@ -278,12 +279,17 @@ void printList(int64_t value) {
 	if(*start_addr != type_empty_list) {
 		printValue(*start_addr);
 		value = *(start_addr + 1);
-		assert((value & result_mask) == type_list);
-		//Print a space if the next thing to print is not the empty list
-		if((*((int64_t* )(value ^ type_list)) & result_mask) != type_empty_list) {
-			printf(" ");
+		if ((value & result_mask) == type_list) {
+			//Print a space if the next thing to print is not the empty list
+			if((*((int64_t* )(value ^ type_list)) & result_mask) != type_empty_list) {
+				printf(" ");
+			}
+			printList(value);
+		} else if((value & result_mask) == type_empty_list) {
+			//Do nothing
+		} else {
+
 		}
-		printList(value);
 	}
 }
 
@@ -361,4 +367,9 @@ void rotateString(char* str) {
 int error() {
 	printf("err\n");
 	exit(0); //The program being executed errored out, but the runtime system did not
+}
+
+/* Signal an error in the runtime system */
+int runtimeSystemError(void) {
+	exit(1);
 }
