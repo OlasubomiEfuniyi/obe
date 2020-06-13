@@ -193,7 +193,7 @@ type Variable =
 (define (compile-number expr env)
   (match expr
     ;;Every integer is treated as a bignum
-    [(? integer? num) (compile-bignum num)]))
+    [(? integer? num) (compile-bignum num env)]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;:::::Compile LetBinding;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Compile a let binding
@@ -290,15 +290,12 @@ type Variable =
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 env))
         (c3 (compile-e e3 env))
-        (true (gensym "true"))
         (false (gensym "false"))
         (end (gensym "end")))
     `(,@c1
-      (cmp rax 0) ;;Only 0 and #f is considered false. A bignum with the value of 0 will not pass this check
-      (je ,false)
+      ;;Only  #f is considered false. A bignum with the value of 0 will not pass this check
       (cmp rax ,type-false)
       (je ,false)
-      ,true
       ,@c2
       (jmp ,end)
       ,false
@@ -718,62 +715,58 @@ type Variable =
   (check-equal? (execute (compile -5)) -5)
   
   ;;Test bignum
-  (check-equal? (execute (compile `(bignum 9223372036854775807))) 9223372036854775807)
-  (check-equal? (execute (compile `(bignum -9223372036854775807))) -9223372036854775807)
+  (check-equal? (execute (compile 9223372036854775807)) 9223372036854775807)
+  (check-equal? (execute (compile -9223372036854775807)) -9223372036854775807)
   
   ;;Test add
   (check-equal? (execute (compile `(add 5 8))) 13)
   (check-equal? (execute (compile `(add 1152921504606846974 1))) 1152921504606846975)
-  (check-equal? (execute (compile `(add (bignum 1) 5))) 'err)
-  (check-equal? (execute (compile `(add 5 (bignum 1)))) 'err)
-  (check-equal? (execute (compile `(add (bignum 1) (bignum 6)))) 'err)
-
-  ;;Test add-bn
-  (check-equal? (execute (compile `(add-bn (bignum 2) (bignum 3)))) 5)
-  (check-equal? (execute (compile `(add-bn (bignum 9223372036854775807) (bignum 9223372036854775807)))) 18446744073709551614)
-  (check-equal? (execute (compile `(add-bn 1 (bignum 1)))) 2)
-  (check-equal? (execute (compile `(add-bn 10 (bignum 1)))) 11)
-  (check-equal? (execute (compile `(add-bn (bignum 2) 9))) 11)
-  (check-equal? (execute (compile `(add-bn 10 11))) 'err)
+  (check-equal? (execute (compile `(add 1 5))) 6)
+  (check-equal? (execute (compile `(add 2852854835955294957474594945204067443045840403248 193847594393848575739028485758594939383838383))) 2853048683549688806050333973689826037985224241631)
+  (check-equal? (execute (compile `(add -9 -8))) -17)
+  (check-equal? (execute (compile `(add -100 20))) -80)
+  (check-equal? (execute (compile `(add 1 (add 2 (add 3 (add 4 (add 5 0))))))) 15)
+  (check-equal? (execute (compile `(add 2853048683549688806050333973689826037985224241631
+                                        (add 2853048683549688806050333973689826037985224241631
+                                             (add 2853048683549688806050333973689826037985224241631
+                                                  (add 2853048683549688806050333973689826037985224241631
+                                                       (add 2853048683549688806050333973689826037985224241631 0))))))) 14265243417748444030251669868449130189926121208155)
+  (check-equal? (execute (compile `(add 5 #t))) 'err)
+  (check-equal? (execute (compile `(add #t #f))) 'err)
+  (check-equal? (execute (compile `(add 2853048683549688806050333973689826037985224241631
+                                        (add 2853048683549688806050333973689826037985224241631
+                                             (add 2853048683549688806050333973689826037985224241631
+                                                  (add 2853048683549688806050333973689826037985224241631
+                                                       (add 2853048683549688806050333973689826037985224241631 #f))))))) 'err)
 
   ;;Test sub
   (check-equal? (execute (compile `(sub 2 1))) 1)
   (check-equal? (execute (compile `(sub 110 10))) 100)
   (check-equal? (execute (compile `(sub (add 2 3) (add 200 300)))) -495)
-  (check-equal? (execute (compile `(sub (bignum 2) 1))) 'err)
-  (check-equal? (execute (compile `(sub 2 (bignum 1)))) 'err)
-  (check-equal? (execute (compile `(sub (bignum 2) (bignum 1)))) 'err)
-  (check-equal? (execute (compile `(sub (add-bn (bignum 2) (bignum 3)) 1))) 'err)
-  (check-equal? (execute (compile `(sub 1 (add-bn (bignum 2) (bignum 3))))) 'err)
-  (check-equal? (execute (compile `(sub (add-bn (bignum 2) (bignum 3)) 1))) 'err)
+  (check-equal? (execute (compile `(sub 10 (sub 9 (sub 8 (sub 7 (sub 6 (sub 5 (sub 4 (sub 3 (sub 2 (sub 1 0)))))))))))) 5)
+  (check-equal? (execute (compile `(sub 1 (sub 2 (sub 3 (sub 4 (sub 5 (sub 6 (sub 7 (sub 8 (sub 9 (sub 10 0)))))))))))) -5)
+  (check-equal? (execute (compile `(sub #t 1))) 'err)
+  (check-equal? (execute (compile `(sub 2 #f))) 'err)
+  (check-equal? (execute (compile `(sub 384859598294957493938859599484949383838399858559594849393928290919848475757738383892928484757583939484959583939488575839485751983
+                                        922228383999999999928177718384849958585858574722234532))) 384859598294957493938859599484949383838399858559594849393928290919848475756816155508928484757655761766574733980902717264763517451)
   (check-equal? (execute (compile `(add (sub 2 1) 9))) 10)
-  
-  ;;Test sub-bn
-  (check-equal? (execute (compile `(sub-bn (bignum 1237940039285380274899124224) (bignum 1208925819614629174706176)))) 1236731113465765645724418048)
-  (check-equal? (execute (compile `(sub-bn (bignum 204840021458546589812482594366668142542429986589197318528619143395036962199099876801) (bignum 204840021458546589812482594366668142542429986589197318528619143395036962199099876801)))) 0)
-  (check-equal? (execute (compile `(sub-bn (bignum 1237940039285380274899124224) 1))) 1237940039285380274899124223)
-  (check-equal? (execute (compile `(sub-bn 1 (bignum 1237940039285380274899124224)))) -1237940039285380274899124223)
-  (check-equal? (execute (compile `(sub-bn 2 1))) 'err)
-  (check-equal? (execute (compile `(sub-bn (bignum 1237940039285380274899124224) (add 1 2)))) 1237940039285380274899124221)
-  (check-equal? (execute (compile `(add-bn (sub-bn (bignum 1) (bignum 10)) 19))) 10)
-  (check-equal? (execute (compile `(sub-bn (sub 6 1) (bignum 5)))) 0)
 
   ;;Test let without pattern matching
   (check-equal? (execute (compile `(let () 5))) 5)
   (check-equal? (execute (compile `(let ((x 5)) x))) 5)
-  (check-equal? (execute (compile `(let ((a 1) (b (bignum 2))) b))) 2)
-  (check-equal? (execute (compile `(let ((a 1) (b (bignum 2))) (add-bn a b)))) 3)
-  (check-equal? (execute (compile `(let () (add-bn 5 5)))) 'err)
-  (check-equal? (execute (compile `(let ((x (add-bn 5 5))) 5))) 'err)
+  (check-equal? (execute (compile `(let ((a 1) (b 2)) b))) 2)
+  (check-equal? (execute (compile `(let ((a 1) (b 2)) (add a b)))) 3)
+  (check-equal? (execute (compile `(let () (add 5 5)))) 10)
+  (check-equal? (execute (compile `(let ((x (add 5 5))) 5))) 5)
   (check-equal? (execute (compile `(let ((x 10)) (let ((x (let ((x 4) (y 6))(sub x y)))) x)))) -2)
   (check-equal? (execute (compile `(let ((x 10)) (let ((x (let ((x 4) (y 6)) (sub x y)))) (add x 2))))) 0)
-  (check-equal? (execute (compile `(let ((x 10)) (let ((x (let ((x 4) (y 6)) (sub x y)))) (add-bn x (bignum 2)))))) 0)
-  (check-equal? (execute (compile `(let ((var1 6)  (var2 7) (var3 (bignum 8))) (add-bn 3 (bignum 8))))) 11)
-  (check-equal? (execute (compile `(let ((var1 6) (var2 7) (var3 (bignum 8))) (add var1 var2) (sub-bn (add-bn var2 var3) 5)))) 10)
-  (check-equal? (execute (compile `(let ((var1 6) (var2 7) (var3 (bignum 8))) (add var1 var2) (sub (add-bn var2 var3) 5)))) 'err)
-  (check-equal? (execute (compile `(let ((var1 6) (var2 7) (var3 (bignum 8))) (add-bn var1 var2) (sub-bn (add-bn var2 var3) 5)))) 'err)
-  (check-equal? (execute (compile `(let ((length (add 2 3)) (breadth (sub-bn (add-bn 1 (bignum 10)) (sub-bn (bignum 8) 2))) (height (sub 6 1))) (add-bn (add-bn length breadth) height)
-                            (add length length) (sub-bn length breadth) (let ((f-dim (add-bn length breadth))) length f-dim)))) 10)
+  (check-equal? (execute (compile `(let ((x 10)) (let ((x (let ((x 4) (y 6)) (sub x y)))) (add x 2))))) 0)
+  (check-equal? (execute (compile `(let ((var1 6)  (var2 7) (var3 8)) (add 3 8)))) 11)
+  (check-equal? (execute (compile `(let ((var1 6) (var2 7) (var3 8)) (add var1 var2) (sub (add var2 var3) 5)))) 10)
+  (check-equal? (execute (compile `(let ((var1 6) (var2 7) (var3 8)) (add var1 var2) (sub (add var2 var3) 5)))) 10)
+  (check-equal? (execute (compile `(let ((var1 6) (var2 7) (var3 8)) (add var1 var2) (sub (add var2 var3) 5)))) 10)
+  (check-equal? (execute (compile `(let ((length (add 2 3)) (breadth (sub (add 1 10) (sub 8 2))) (height (sub 6 1))) (add (add length breadth) height)
+                            (add length length) (sub length breadth) (let ((f-dim (add length breadth))) length f-dim)))) 10)
 
   ;;Test let with pattern matching
   (check-equal? (execute (compile `(let ((x y (cons 1 2))) (add x y)))) 3)
@@ -782,8 +775,8 @@ type Variable =
   (check-equal? (execute (compile `(let ((h t (add 1 2))) h))) 'err)
   (check-equal? (execute (compile `(let ((lst (cons 1 (cons 2 (cons 3 (cons 4 '())))))) (let ((h t (tail lst))) t)))) ''(3 4))
   (check-equal? (execute (compile `(let ((lst (cons 1 (cons 2 (cons 3 (cons 4 '())))))) (let ((h t (second lst))) t)))) ''(3 4))
-  (check-equal? (execute (compile `(let ((var1 (bignum 1234)) (x y (cons 1 2))) (add-bn var1 x)))) 1235)
-  (check-equal? (execute (compile `(let ((x y (cons 1 2)) (var1 (bignum 1234))) (add-bn var1 x)))) 1235)
+  (check-equal? (execute (compile `(let ((var1 1234) (x y (cons 1 2))) (add var1 x)))) 1235)
+  (check-equal? (execute (compile `(let ((x y (cons 1 2)) (var1 1234)) (add var1 x)))) 1235)
   (check-equal? (execute (compile `(let ((var1 1) (var2 #t) (var3 var4 (cons 1 (cons 2 (cons 3 4))))) (if var2 (add (add var1 var3) (first var4)) 0)))) 4)
   (check-equal? (execute (compile `(let ((a b '(1 2 3 4))) (let ((c d b)) (let ((e f d)) (add (add a c) e)))))) 6)
   (check-equal? (execute (compile `(let ((myList (cons 1 (cons 2 '()))))
@@ -798,22 +791,22 @@ type Variable =
   
   ;;Test if expression
   (check-equal? (execute (compile `(if (add 1 2) (add 1 3) (sub 1 2)))) 4)
-  (check-equal? (execute (compile `(if (add -1 1) (add 1 3) (sub 1 2)))) -1)
+  (check-equal? (execute (compile `(if (add -1 1) (add 1 3) (sub 1 2)))) 4)
   (check-equal? (execute (compile `(if #t 5 6))) 5)
   (check-equal? (execute (compile `(if #f 5 6))) 6)
   (check-equal? (execute (compile `(if 5 #t #f))) #t)
-  (check-equal? (execute (compile `(if 0 #t #f))) #f)
-  (check-equal? (execute (compile `(if (bignum 12345678912345678912345678912345678912345678901234567890123456789123456789012345678901234567890) (add 1 3) (sub 1 2)))) 4)
-  (check-equal? (execute (compile `(if (sub-bn (bignum 12345678912345678912345678912345678912345678901234567890123456789123456789012345678901234567890) (bignum 12345678912345678912345678912345678912345678901234567890123456789123456789012345678901234567890)) (add 1 3) (sub 1 2)))) 4)
+  (check-equal? (execute (compile `(if 0 #t #f))) #t)
+  (check-equal? (execute (compile `(if 12345678912345678912345678912345678912345678901234567890123456789123456789012345678901234567890 (add 1 3) (sub 1 2)))) 4)
+  (check-equal? (execute (compile `(if (sub 12345678912345678912345678912345678912345678901234567890123456789123456789012345678901234567890 12345678912345678912345678912345678912345678901234567890123456789123456789012345678901234567890) (add 1 3) (sub 1 2)))) 4)
   (check-equal? (execute (compile `(if (let ((var1 1) (var2 (let ((var1 2) (var2 3)) (add var1 var2)))) (sub var2 var1)) 1 2))) 1)
-  (check-equal? (execute (compile `(if 0 1 (let ((var1 1) (var2 (let ((var1 2) (var2 3)) (add var1 var2)))) (sub var2 var1))))) 4)
+  (check-equal? (execute (compile `(if 0 1 (let ((var1 1) (var2 (let ((var1 2) (var2 3)) (add var1 var2)))) (sub var2 var1))))) 1)
   (check-equal? (execute (compile `(let ((x (if 1 2 3)) (y (if (add 0 1) 5 6))) (if (sub x y) x y)))) 2)
 
   ;;Test list value
   (check-equal? (execute (compile ''(1 2 3))) ''(1 2 3))
   (check-equal? (execute (compile ''(#t #f #t #f))) ''(#t #f #t #f))
   (check-equal? (execute (compile ''((add 2 3) (sub 1 2)))) ''(5 -1))
-  (check-equal? (execute (compile ''((bignum 12345678901234567890) (if #t 1 2)))) ''(12345678901234567890 1))
+  (check-equal? (execute (compile ''(12345678901234567890 (if #t 1 2)))) ''(12345678901234567890 1))
   (check-equal? (execute (compile ''('(#t #f) 1 2 '(3 4)))) ''('(#t #f) 1 2 '(3 4)))
   (check-equal? (execute (compile ''('('(1) '(2))))) ''('('(1) '(2))))
   
@@ -822,14 +815,14 @@ type Variable =
   (check-equal? (execute (compile '(head '()))) 'err)
   (check-equal? (execute (compile '(head (head '('(1 5) 2 3))))) 1)
   (check-equal? (execute (compile '(head '('('(1) '(2)))))) ''('(1) '(2)))
-  (check-equal? (execute (compile '(head (if #t '((bignum 1) (add 1 2)) #f)))) 1)
+  (check-equal? (execute (compile '(head (if #t '( 1 (add 1 2)) #f)))) 1)
   
   ;;Test Tail
   (check-equal? (execute (compile '(tail '(1 2 3)))) ''(2 3))
   (check-equal? (execute (compile '(tail '()))) 'err)
   (check-equal? (execute (compile '(tail (tail '('(1 5) 2 3))))) ''(3))
   (check-equal? (execute (compile '(tail '('('(1) '(2)))))) ''())
-  (check-equal? (execute (compile '(tail (if #t '((bignum 1) (add 1 2)) #f)))) ''(3))
+  (check-equal? (execute (compile '(tail (if #t '(1 (add 1 2)) #f)))) ''(3))
 
   ;;Test Pair
   (check-equal? (execute (compile '(cons #t #f))) ''(#t . #f))
