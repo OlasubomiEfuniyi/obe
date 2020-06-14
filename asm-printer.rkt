@@ -36,6 +36,10 @@ type ControlFlow =
 |'(jmp ,Symbol)
 |'(jne ,Symbol)
 |'(je ,Symbol)
+|'(jle ,Symbol)
+|'(jge ,Symbol)
+|'(jl ,Symbol)
+|'(jg ,Symbol)
 
 type Arg =
 | Value
@@ -64,7 +68,7 @@ type Register
   (require rackunit))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Assembly conversion functions;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (define (assembly compiled-prog)
-  (string-append "\tglobal entry\n \textern error\n \textern addBignum\n \textern subBignum\n \textern rotateString\n \tsection .text\n entry:\n \tpush rbp\n \tmov rbp, rsp\n \tpush rbx\n \tpush rdi\n \tpush rsi\n" (asm->assembly compiled-prog)))
+  (string-append "\tglobal entry\n \textern error\n \textern addBignum\n \textern subBignum\n \textern rotateString\n \textern compBignum\n \tsection .text\n entry:\n \tpush rbp\n \tmov rbp, rsp\n \tpush rbx\n \tpush rdi\n \tpush rsi\n" (asm->assembly compiled-prog)))
 
 ;;Conver a list of ASM to assembly strin
 ;;Listof(ASM) -> string
@@ -109,6 +113,10 @@ type Register
     [`(jmp ,lab) (string-append "\tjmp " (symbol->string lab))]
     [`(jne ,lab) (string-append "\tjne " (symbol->string lab))]
     [`(je ,lab) (string-append "\tje " (symbol->string lab))]
+    [`(jle ,lab) (string-append "\tjle " (symbol->string lab))]
+    [`(jge ,lab) (string-append "\tjge " (symbol->string lab))]
+    [`(jl ,lab) (string-append "\tjl " (symbol->string lab))]
+    [`(jg ,lab) (string-append "\tjg " (symbol->string lab))]
     [`(call ,lab) (string-append "\tcall " (symbol->string lab))]
     [_ (error "Unsupported control flow")]))
 
@@ -165,7 +173,7 @@ type Register
 (define (control-flow? asm)
   (match asm
     ['ret #t]
-    [(list (or 'jmp 'jne 'je 'call) lab) #t]
+    [(list (or 'jmp 'jne 'je 'jle 'jge 'jl 'jg 'call) lab) #t]
     [_ #f]))
 
 ;;Determine if the argument is  a Value

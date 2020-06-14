@@ -241,6 +241,39 @@ int64_t  subBignum(int64_t arg0, int64_t  arg1, int64_t arg2) {
 	return (len + padding);
 }
 
+/* Compare two bignums  */
+int64_t compBignum(int64_t arg0, int64_t arg1) {
+	mpz_t result1;
+	mpz_t result2;
+	int flag = 0;
+
+	mpz_init(result1);
+	mpz_init(result2);
+
+	mpz_set_ui(result1, 0);
+	mpz_set_ui(result2, 0);
+
+	/* Make sure that both arguments are pointers to bingums */
+	assert(((arg0 & result_mask) == type_bignum) && (arg1 & result_mask) == type_bignum);
+	
+	/* Untag the arguments */
+	arg0 = arg0 ^ type_bignum;
+	arg1 = arg1 ^ type_bignum;
+	
+	/* Set the number using its string representation on the heap */
+	flag = mpz_set_str(result1, (char *) arg0, 10);
+	assert(flag == 0);
+
+	flag = mpz_set_str(result2, (char *) arg1, 10);
+	assert(flag == 0);
+
+	/* Return the result of comparing the two bignums using the mpz_cmp function from the GMP library */	
+	int comp_res =  mpz_cmp(result1, result2);
+
+	return comp_res;
+}
+
+
 /* Print a value. If printEmpty is true, print the empty list symbol, otherwise do not */
 void printValue(int64_t value) {
 	switch(value & result_mask) {

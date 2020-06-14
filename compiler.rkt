@@ -21,6 +21,7 @@ type CEnv = Listof(Symbol)
 
 type Expr =
 |Value
+|Logic
 |Arithmetic
 |Decision
 |LetBinding
@@ -28,6 +29,14 @@ type Expr =
 |ListOp
 |PairOp
 
+type Logic =
+|`(>  Expr Expr) where both arguments evaluate to a Number
+|`(< Number Number) where both arguments evaluate to a Number
+|`(>= Number Number) where both arguments evaluate to a Number
+|`(<= Number Number) where both arguments evaluate to a Number
+|`(= Expr Expr) ;;Structural equality
+|`(and Expr Expr) where both arguments evaluate to a Boolean
+|`(or Expr Expr) where both arguments evaluate to a Boolean
 
 type ListOp =
 |`(head List)
@@ -62,7 +71,6 @@ type Boolean =
 
 type Number =
 | integer
-|`(bignum ,integer)
 
 type LetBinding =
 | `(let (Binding*) Expr+)
@@ -88,6 +96,7 @@ type Variable =
     [(? decision? expr) (desugar-decision expr)]
     [(? list-op? expr) (desugar-list-op expr)]
     [(? pair-op? expr) (desugar-pair-op expr)]
+    [(? logic? expr) (desugar-logic expr)]
     [_ (error "Invalid Program")]))
 
 ;;Desugar a value
@@ -135,6 +144,15 @@ type Variable =
   (match expr
     [`(if ,e1 ,e2 ,e3) `(if ,(desugar e1) ,(desugar e2) ,(desugar e3))]))
 
+;;Desugar a logical expression
+;;Logic -> Logic
+(define (desugar-logic expr)
+  (match expr
+    [`(> ,e1 ,e2) `(> ,(desugar e1) ,(desugar e2))]
+    [`(< ,e1 ,e2) `(< ,(desugar e1) ,(desugar e2))]
+    [`(>= ,e1 ,e2) `(>= ,(desugar e1) ,(desugar e2))]
+    [`(<= ,e1 ,e2) `(<= ,(desugar e1) ,(desugar e2))]
+    [`(= ,e1 ,e2) `(= ,(desugar e1) ,(desugar e2))]))
 
 (define (list-literal-to-cons lst)
   (match lst
@@ -169,6 +187,7 @@ type Variable =
     [(? decision? expr) (compile-decision expr env)]
     [(? list-op? expr) (compile-list-op expr env)]
     [(? pair-op? expr) (compile-pair-op expr env)]
+    [(? logic? expr) (compile-logic expr env)]
     [_ (error "Invalid Program")]))
 
 
@@ -443,6 +462,278 @@ type Variable =
       ;;Tag the result as a bignum
       (or rax ,type-bignum))))
 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile a logical operation;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;Compile a logical operation
+;;Expr CEnv -> ASM
+(define (compile-logic expr env)
+  (match expr
+    [`(> ,e1 ,e2) (compile-greater e1 e2 env)]
+    [`(< ,e1 ,e2) (compile-less e1 e2 env)]
+    [`(>= ,e1 ,e2) (compile-greater-equal e1 e2 env)]
+    [`(<= ,e1 ,e2) (compile-less-equal e1 e2 env)]
+    [`(= ,e1 ,e2) (compile-equal e1 e2 env)]))
+
+;;Compile the greater than logical operation
+;;Expr Expr CEnv -> ASM
+(define (compile-greater e1 e2 env)
+  (let ((c1 (compile-e e1 env))
+        (c2 (compile-e e2 (extend #f env)))
+        (stack-size (* 8 (+ 4 (length env))))
+        (false (gensym "false"))
+        (end (gensym "end")))
+    `(,@c1
+      ,@assert-bignum
+      ;;Save the result of evaluating the first expression on the stack
+      (mov (offset rsp ,(- (add1 (length env)))) rax)
+
+      ,@c2
+      ,@assert-bignum
+      ;;Save the stack
+      (mov r15 rsp) ;;The function being called will take care of setting and restoring rbp
+
+      ;;Save the registers used to pass in arguments
+      (mov (offset rsp ,(- (+ 2 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 3 (length env)))) rsi)
+
+      ;;Call compBignum
+      (mov rdi (offset rsp ,(- (add1 (length env))))) ;;Pass the first argument
+      (mov rsi rax) ;;Pass the second argument
+
+      (sub rsp ,stack-size)
+      (call compBignum)
+
+      ;;Make sure the stack is as expected and then restore the stack
+      ;;stack pointer to where it was before the setup for the function
+      ;;call
+      (mov rbx r15) ;;Get the previous base of the stack
+      (sub rbx rsp) ;;Subtract it from the top of the stack. This should give us the stack size if everything went well
+      (cmp rbx ,stack-size)
+      (jne err)
+      (mov rsp r15)
+
+      ;;Restore the registers used to pass arguments
+      (mov rdi (offset rsp ,(- (+ 2 (length env)))))
+      (mov rsi (offset rsp ,(- (+ 3 (length env)))))
+
+      ;;Determine the appropriate boolean value to return
+      (mov rbx 0)
+      (cmp rax rbx)
+      (jle ,false)
+      (mov rax ,type-true)
+      (jmp ,end)
+      ,false
+      (mov rax ,type-false)
+      ,end)))
+
+;;Compile the less than logical operation
+;;Expr Expr CEnv -> ASM
+(define (compile-less e1 e2 env)
+  (let ((c1 (compile-e e1 env))
+        (c2 (compile-e e2 (extend #f env)))
+        (stack-size (* 8 (+ 4 (length env))))
+        (false (gensym "false"))
+        (end (gensym "end")))
+    `(,@c1
+      ,@assert-bignum
+      ;;Save the result of evaluating the first expression on the stack
+      (mov (offset rsp ,(- (add1 (length env)))) rax)
+
+      ,@c2
+      ,@assert-bignum
+      ;;Save the stack
+      (mov r15 rsp) ;;The function being called will take care of setting and restoring rbp
+
+      ;;Save the registers used to pass in arguments
+      (mov (offset rsp ,(- (+ 2 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 3 (length env)))) rsi)
+
+      ;;Call compBignum
+      (mov rdi (offset rsp ,(- (add1 (length env))))) ;;Pass the first argument
+      (mov rsi rax) ;;Pass the second argument
+
+      (sub rsp ,stack-size)
+      (call compBignum)
+
+      ;;Make sure the stack is as expected and then restore the stack
+      ;;stack pointer to where it was before the setup for the function
+      ;;call
+      (mov rbx r15) ;;Get the previous base of the stack
+      (sub rbx rsp) ;;Subtract it from the top of the stack. This should give us the stack size if everything went well
+      (cmp rbx ,stack-size)
+      (jne err)
+      (mov rsp r15)
+
+      ;;Restore the registers used to pass arguments
+      (mov rdi (offset rsp ,(- (+ 2 (length env)))))
+      (mov rsi (offset rsp ,(- (+ 3 (length env)))))
+
+      ;;Determine the appropriate boolean value to return
+      (mov rbx 0)
+      (cmp rax rbx)
+      (jge ,false)
+      (mov rax ,type-true)
+      (jmp ,end)
+      ,false
+      (mov rax ,type-false)
+      ,end)))
+
+;;Compile the greater than or equal logical operation
+;;Expr  Expr CEnv -> ASM
+(define (compile-greater-equal e1 e2 env)
+  (let ((c1 (compile-e e1 env))
+        (c2 (compile-e e2 (extend #f env)))
+        (stack-size (* 8 (+ 4 (length env))))
+        (false (gensym "false"))
+        (end (gensym "end")))
+    `(,@c1
+      ,@assert-bignum
+      ;;Save the result of evaluating the first expression on the stack
+      (mov (offset rsp ,(- (add1 (length env)))) rax)
+
+      ,@c2
+      ,@assert-bignum
+      ;;Save the stack
+      (mov r15 rsp) ;;The function being called will take care of setting and restoring rbp
+
+      ;;Save the registers used to pass in arguments
+      (mov (offset rsp ,(- (+ 2 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 3 (length env)))) rsi)
+
+      ;;Call compBignum
+      (mov rdi (offset rsp ,(- (add1 (length env))))) ;;Pass the first argument
+      (mov rsi rax) ;;Pass the second argument
+
+      (sub rsp ,stack-size)
+      (call compBignum)
+
+      ;;Make sure the stack is as expected and then restore the stack
+      ;;stack pointer to where it was before the setup for the function
+      ;;call
+      (mov rbx r15) ;;Get the previous base of the stack
+      (sub rbx rsp) ;;Subtract it from the top of the stack. This should give us the stack size if everything went well
+      (cmp rbx ,stack-size)
+      (jne err)
+      (mov rsp r15)
+
+      ;;Restore the registers used to pass arguments
+      (mov rdi (offset rsp ,(- (+ 2 (length env)))))
+      (mov rsi (offset rsp ,(- (+ 3 (length env)))))
+
+      ;;Determine the appropriate boolean value to return
+      (mov rbx 0)
+      (cmp rax rbx)
+      (jl ,false)
+      (mov rax ,type-true)
+      (jmp ,end)
+      ,false
+      (mov rax ,type-false)
+      ,end)))
+
+;;Compile the less than or equal logical operation
+;;Expr Expr CEnv -> ASM
+(define (compile-less-equal e1 e2 env)
+  (let ((c1 (compile-e e1 env))
+        (c2 (compile-e e2 (extend #f env)))
+        (stack-size (* 8 (+ 4 (length env))))
+        (false (gensym "false"))
+        (end (gensym "end")))
+    `(,@c1
+      ,@assert-bignum
+      ;;Save the result of evaluating the first expression on the stack
+      (mov (offset rsp ,(- (add1 (length env)))) rax)
+
+      ,@c2
+      ,@assert-bignum
+      ;;Save the stack
+      (mov r15 rsp) ;;The function being called will take care of setting and restoring rbp
+
+      ;;Save the registers used to pass in arguments
+      (mov (offset rsp ,(- (+ 2 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 3 (length env)))) rsi)
+
+      ;;Call compBignum
+      (mov rdi (offset rsp ,(- (add1 (length env))))) ;;Pass the first argument
+      (mov rsi rax) ;;Pass the second argument
+
+      (sub rsp ,stack-size)
+      (call compBignum)
+
+      ;;Make sure the stack is as expected and then restore the stack
+      ;;stack pointer to where it was before the setup for the function
+      ;;call
+      (mov rbx r15) ;;Get the previous base of the stack
+      (sub rbx rsp) ;;Subtract it from the top of the stack. This should give us the stack size if everything went well
+      (cmp rbx ,stack-size)
+      (jne err)
+      (mov rsp r15)
+
+      ;;Restore the registers used to pass arguments
+      (mov rdi (offset rsp ,(- (+ 2 (length env)))))
+      (mov rsi (offset rsp ,(- (+ 3 (length env)))))
+
+      ;;Determine the appropriate boolean value to return
+      (mov rbx 0)
+      (cmp rax rbx)
+      (jg ,false)
+      (mov rax ,type-true)
+      (jmp ,end)
+      ,false
+      (mov rax ,type-false)
+      ,end)))
+
+;;Compile the equal logical operation
+;;Expr Expr CEnv -> ASM
+(define (compile-equal e1 e2 env)
+  (let ((c1 (compile-e e1 env))
+        (c2 (compile-e e2 (extend #f env)))
+        (stack-size (* 8 (+ 4 (length env))))
+        (false (gensym "false"))
+        (end (gensym "end")))
+    `(,@c1
+      ,@assert-bignum
+      ;;Save the result of evaluating the first expression on the stack
+      (mov (offset rsp ,(- (add1 (length env)))) rax)
+
+      ,@c2
+      ,@assert-bignum
+      ;;Save the stack
+      (mov r15 rsp) ;;The function being called will take care of setting and restoring rbp
+
+      ;;Save the registers used to pass in arguments
+      (mov (offset rsp ,(- (+ 2 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 3 (length env)))) rsi)
+
+      ;;Call compBignum
+      (mov rdi (offset rsp ,(- (add1 (length env))))) ;;Pass the first argument
+      (mov rsi rax) ;;Pass the second argument
+
+      (sub rsp ,stack-size)
+      (call compBignum)
+
+      ;;Make sure the stack is as expected and then restore the stack
+      ;;stack pointer to where it was before the setup for the function
+      ;;call
+      (mov rbx r15) ;;Get the previous base of the stack
+      (sub rbx rsp) ;;Subtract it from the top of the stack. This should give us the stack size if everything went well
+      (cmp rbx ,stack-size)
+      (jne err)
+      (mov rsp r15)
+
+      ;;Restore the registers used to pass arguments
+      (mov rdi (offset rsp ,(- (+ 2 (length env)))))
+      (mov rsi (offset rsp ,(- (+ 3 (length env)))))
+
+      ;;Determine the appropriate boolean value to return
+      (mov rbx 0)
+      (cmp rax rbx)
+      (jne ,false)
+      (mov rax ,type-true)
+      (jmp ,end)
+      ,false
+      (mov rax ,type-false)
+      ,end)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;:::::::::::Compile Arithmetic Operations;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Compile the addition of two big nums
 ;;Expr Expr CEnv-> ASM
@@ -459,7 +750,7 @@ type Variable =
       (mov r15 rsp) ;;The function being called will take care of setting and restoring rbp
 
       ;;Save the registers used to pass in arguments
-      (mov (offset rsp ,(- (+ 2 (length env)))) rdi)  ;;Store a pointer to the beginning of the result on the stack
+      (mov (offset rsp ,(- (+ 2 (length env)))) rdi) 
       (mov (offset rsp ,(- (+ 3 (length env)))) rsi)
       (mov (offset rsp ,(- (+ 4 (length env)))) rdx)
       
@@ -497,7 +788,6 @@ type Variable =
       ;;Return a tagged pointer to the result on the heap
       (mov rax (offset rsp ,(- (+ 2 (length env)))))
       (or rax ,type-bignum))))
-
 
 ;;Compile the subtraction of two bignums
 ;;Expr Expr CEnv-> ASM
@@ -708,6 +998,13 @@ type Variable =
     [`(second ,pair) #t]
     [_ #f]))
 
+;;Determine if the expression is a logical expression
+;;Expr -> boolean
+(define (logic? expr)
+  (match expr
+    [(or `(> ,e1 ,e2)`(< ,e1 ,e2) `(>= ,e1 ,e2) `(<= ,e1 ,e2) `(= ,e1 ,e2)) #t]
+    [_ #f]))
+    
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Tests;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (module+ test
   ;;Test integers
@@ -853,6 +1150,89 @@ type Variable =
     (check-equal? (execute (compile `(second ,lp))) ''(1 2 3))
     (check-equal? (execute (compile `(first (second ,lp)))) 1) 
     (check-equal? (execute (compile `(head (second ,lp)))) 1)
-    (check-equal? (execute (compile `(tail (second ,lp)))) ''(2 3))))
+    (check-equal? (execute (compile `(tail (second ,lp)))) ''(2 3)))
+
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Test Logical operators;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+  ;;Test >
+  (check-equal? (execute (compile `(> 6 5))) #t)
+  (check-equal? (execute (compile `(> 5 6))) #f)
+  (check-equal? (execute (compile `(> -5 -2))) #f)
+  (check-equal? (execute (compile `(> -2 -5))) #t)
+  (check-equal? (execute (compile `(> 123456789123456789123456789123456789123456789123456789123456789123456789123456789 123456789123456789123456789123456789123456789))) #t)
+  (check-equal? (execute (compile `(> 5 #t))) 'err)
+  (check-equal? (execute (compile `(> #t 5))) 'err)
+  (check-equal? (execute (compile `(> #t #f))) 'err)
+  (check-equal? (execute (compile `(> (add 70 80) (sub 30 50)))) #t)
+  (check-equal? (execute (compile `(> (let ((x 5) (y 6) (z 7)) (add x (add y (add z 0)))) (let ((x 1) (y 2) (z 3)) (sub x (sub y (sub z 0))))))) #t)
+  (check-equal? (execute (compile `(let ((x (> 5 3))) x))) #t)
+  (check-equal? (execute (compile `(let ((x 1) (y 2)) (> y x)))) #t)
+
+  ;;Test <
+  (check-equal? (execute (compile `(< 6 5))) #f)
+  (check-equal? (execute (compile `(< 5 6))) #t)
+  (check-equal? (execute (compile `(< -5 -2))) #t)
+  (check-equal? (execute (compile `(< -2 -5))) #f)
+  (check-equal? (execute (compile `(< 123456789123456789123456789123456789123456789123456789123456789123456789123456789 123456789123456789123456789123456789123456789))) #f)
+  (check-equal? (execute (compile `(< 5 #t))) 'err)
+  (check-equal? (execute (compile `(< #t 5))) 'err)
+  (check-equal? (execute (compile `(< #t #f))) 'err)
+  (check-equal? (execute (compile `(< (add 70 80) (sub 30 50)))) #f)
+  (check-equal? (execute (compile `(< (let ((x 5) (y 6) (z 7)) (add x (add y (add z 0)))) (let ((x 1) (y 2) (z 3)) (sub x (sub y (sub z 0))))))) #f)
+  (check-equal? (execute (compile `(let ((x (< 5 3))) x))) #f)
+  (check-equal? (execute (compile `(let ((x 1) (y 2)) (< x y)))) #t)
+
+    ;;Test >=
+  (check-equal? (execute (compile `(>= 6 5))) #t)
+  (check-equal? (execute (compile `(>= 5 6))) #f)
+  (check-equal? (execute (compile `(>= 6 6))) #t)
+  (check-equal? (execute (compile `(>= -5 -2))) #f)
+  (check-equal? (execute (compile `(>= -2 -5))) #t)
+  (check-equal? (execute (compile `(>= 123456789123456789123456789123456789123456789123456789123456789123456789123456789 123456789123456789123456789123456789123456789))) #t)
+  (check-equal? (execute (compile `(>= 5 #t))) 'err)
+  (check-equal? (execute (compile `(>= #t 5))) 'err)
+  (check-equal? (execute (compile `(>= #t #f))) 'err)
+  (check-equal? (execute (compile `(>= (add 70 80) (sub 30 50)))) #t)
+  (check-equal? (execute (compile `(>= (add 70 80) (sub 200 50)))) #t)
+  (check-equal? (execute (compile `(>= (let ((x 5) (y 6) (z 7)) (add x (add y (add z 0)))) (let ((x 1) (y 2) (z 3)) (sub x (sub y (sub z 0))))))) #t)
+  (check-equal? (execute (compile `(let ((x (>= 5 3))) x))) #t)
+  (check-equal? (execute (compile `(let ((x 1) (y 2)) (>= y x)))) #t)
+
+  ;;Test <=
+  (check-equal? (execute (compile `(<= 6 5))) #f)
+  (check-equal? (execute (compile `(<= 5 6))) #t)
+  (check-equal? (execute (compile `(<= 6 6))) #t)
+  (check-equal? (execute (compile `(<= -5 -2))) #t)
+  (check-equal? (execute (compile `(<= -2 -5))) #f)
+  (check-equal? (execute (compile `(<= 123456789123456789123456789123456789123456789123456789123456789123456789123456789 123456789123456789123456789123456789123456789))) #f)
+  (check-equal? (execute (compile `(<= 5 #t))) 'err)
+  (check-equal? (execute (compile `(<= #t 5))) 'err)
+  (check-equal? (execute (compile `(<= #t #f))) 'err)
+  (check-equal? (execute (compile `(<= (add 70 80) (sub 30 50)))) #f)
+  (check-equal? (execute (compile `(<= (add 70 80) (sub 200 50)))) #t)
+  (check-equal? (execute (compile `(<= (let ((x 5) (y 6) (z 7)) (add x (add y (add z 0)))) (let ((x 1) (y 2) (z 3)) (sub x (sub y (sub z 0))))))) #f)
+  (check-equal? (execute (compile `(let ((x (<= 5 3))) x))) #f)
+  (check-equal? (execute (compile `(let ((x 1) (y 2)) (<= x y)))) #t)
+
+  
+  ;;Test =
+  #|(check-equal? (execute (compile `(= 5 5))) #t)
+  (check-equal? (execute (compile `(= #t #t))) #t)
+  (check-equal? (execute (compile `(= #t #f))) #f)
+  (check-equal? (execute (compile `(= '(1 2 3 4 5) '(1 2 3 4 5)))) #t)
+  (check-equal? (execute (compile `(= '(1 2) '(1)))) #f)
+  (check-equal? (execute (compile `(= (cons 1 (cons 2 (cons 3 '())))) (cons 1 (cons 2 (cons 3 '()))))) #t)
+  (check-equal? (execute (compile `(= (head '(1 2 3)) 1))) #t)
+  (check-equal? (execute (compile `(= (head '(1 2 3)) (tail '(1 2 3))))) #f)
+  (check-equal? (execute (compile `(= (tail '(1 2 3) '(2 3))))) #t)
+  (check-equal? (execute (compile `(= '() '()))) #t)
+  (check-equal? (execute (compile `(= '() (tail '(1))))) #t)
+  (check-equal? (execute (compile `(= (add 1 2) (add 3 0)))) #t)
+  (check-equal? (execute (compile `(= (cons 1 2) (cons 1 2)))) #t)
+  (check-equal? (execute (compile `(= (cons 1 2) (cons 2 1)))) #f)
+  (check-equal? (execute (compile `(= (cons 1 (cons 2 (cons 3 4))) '(1 2 3 4)))) #f)
+  (check-equal? (execute (compile `(= (first (cons 1 2)) (add 0 1)))) #t)
+  (check-equal? (execute (compile `(= (first (cons 1 2)) (second (cons 1 2))))) #f)
+  (check-equal? (execute (compile `(let ((x 1) (y 1) (z 2)) (= x y)))) #t)
+  (check-equal? (execute (compile `(let ((x 1) (y 1) (z 2)) (= x z)))) #f)|#)
   
 
