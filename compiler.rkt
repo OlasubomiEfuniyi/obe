@@ -479,7 +479,7 @@ type Variable =
 (define (compile-greater e1 e2 env)
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
-        (stack-size (* 8 (+ 4 (length env))))
+        (stack-size (* 8 (+ 3 (length env))))
         (false (gensym "false"))
         (end (gensym "end")))
     `(,@c1
@@ -531,7 +531,7 @@ type Variable =
 (define (compile-less e1 e2 env)
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
-        (stack-size (* 8 (+ 4 (length env))))
+        (stack-size (* 8 (+ 3 (length env))))
         (false (gensym "false"))
         (end (gensym "end")))
     `(,@c1
@@ -583,7 +583,7 @@ type Variable =
 (define (compile-greater-equal e1 e2 env)
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
-        (stack-size (* 8 (+ 4 (length env))))
+        (stack-size (* 8 (+ 3 (length env))))
         (false (gensym "false"))
         (end (gensym "end")))
     `(,@c1
@@ -635,7 +635,7 @@ type Variable =
 (define (compile-less-equal e1 e2 env)
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
-        (stack-size (* 8 (+ 4 (length env))))
+        (stack-size (* 8 (+ 3 (length env))))
         (false (gensym "false"))
         (end (gensym "end")))
     `(,@c1
@@ -687,16 +687,30 @@ type Variable =
 (define (compile-equal e1 e2 env)
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
-        (stack-size (* 8 (+ 4 (length env))))
+        (stack-size (* 8 (+ 3 (length env))))
         (false (gensym "false"))
-        (end (gensym "end")))
+        (end (gensym "end"))
+        (bignum (gensym "bignum"))
+        (list (gensym "list"))
+        (pair (gensym "pair"))
+        (simple (gensym "simple"))
+        (empty-list (gensym "empty"))
+        (continue (gensym "continue")))
     `(,@c1
-      ,@assert-bignum
+  
       ;;Save the result of evaluating the first expression on the stack
       (mov (offset rsp ,(- (add1 (length env)))) rax)
 
       ,@c2
-      ,@assert-bignum
+
+      (mov r10 (offset rsp ,(- (add1 (length env)))))
+      (mov r11 rax)
+
+      (and r10 ,type-mask)
+      (and r11 ,type-mask)
+      (cmp r10 r11)
+      (jne ,false)
+      
       ;;Save the stack
       (mov r15 rsp) ;;The function being called will take care of setting and restoring rbp
 
@@ -709,8 +723,41 @@ type Variable =
       (mov rsi rax) ;;Pass the second argument
 
       (sub rsp ,stack-size)
-      (call compBignum)
 
+      (cmp r10 ,type-bignum)
+      (je ,bignum)
+      (cmp r10 ,type-list)
+      (je ,list)
+      (cmp r10 ,type-pair)
+      (je ,pair)
+      (cmp r10 ,type-false)
+      (je ,simple)
+      (cmp r10 ,type-true)
+      (je ,simple)
+      (cmp r10 ,type-empty-list)
+      (je ,simple)
+      
+      ,bignum
+      (call compBignum)
+      (jmp ,continue)
+      
+      ,list
+      (call listEqual)
+      (jmp ,continue)
+      
+      ,pair
+      (call pairEqual)
+      (jmp ,continue)
+      
+      ,simple
+      (mov rax (offset rsp ,(- (add1 (length env)))))
+      (mov rbx (offset rsp ,(- (+ 2 (length env)))))
+      (cmp rax rbx)
+      (jne ,false)
+      (mov rax ,type-true)
+      (jmp ,end)
+      
+      ,continue
       ;;Make sure the stack is as expected and then restore the stack
       ;;stack pointer to where it was before the setup for the function
       ;;call
@@ -1215,24 +1262,24 @@ type Variable =
 
   
   ;;Test =
-  #|(check-equal? (execute (compile `(= 5 5))) #t)
+  (check-equal? (execute (compile `(= 5 5))) #t)
   (check-equal? (execute (compile `(= #t #t))) #t)
   (check-equal? (execute (compile `(= #t #f))) #f)
-  (check-equal? (execute (compile `(= '(1 2 3 4 5) '(1 2 3 4 5)))) #t)
-  (check-equal? (execute (compile `(= '(1 2) '(1)))) #f)
-  (check-equal? (execute (compile `(= (cons 1 (cons 2 (cons 3 '())))) (cons 1 (cons 2 (cons 3 '()))))) #t)
-  (check-equal? (execute (compile `(= (head '(1 2 3)) 1))) #t)
+  ;;(check-equal? (execute (compile `(= '(1 2 3 4 5) '(1 2 3 4 5)))) #t)
+  ;;(check-equal? (execute (compile `(= '(1 2) '(1)))) #f)
+  ;;(check-equal? (execute (compile `(= (cons 1 (cons 2 (cons 3 '())))) (cons 1 (cons 2 (cons 3 '()))))) #t)
+  ;;(check-equal? (execute (compile `(= (head '(1 2 3)) 1))) #t)
   (check-equal? (execute (compile `(= (head '(1 2 3)) (tail '(1 2 3))))) #f)
-  (check-equal? (execute (compile `(= (tail '(1 2 3) '(2 3))))) #t)
+  ;;(check-equal? (execute (compile `(= (tail '(1 2 3) '(2 3))))) #t)
   (check-equal? (execute (compile `(= '() '()))) #t)
-  (check-equal? (execute (compile `(= '() (tail '(1))))) #t)
+  ;;(check-equal? (execute (compile `(= '() (tail '(1))))) #t)
   (check-equal? (execute (compile `(= (add 1 2) (add 3 0)))) #t)
-  (check-equal? (execute (compile `(= (cons 1 2) (cons 1 2)))) #t)
-  (check-equal? (execute (compile `(= (cons 1 2) (cons 2 1)))) #f)
+  ;;(check-equal? (execute (compile `(= (cons 1 2) (cons 1 2)))) #t)
+  ;;(check-equal? (execute (compile `(= (cons 1 2) (cons 2 1)))) #f)
   (check-equal? (execute (compile `(= (cons 1 (cons 2 (cons 3 4))) '(1 2 3 4)))) #f)
   (check-equal? (execute (compile `(= (first (cons 1 2)) (add 0 1)))) #t)
   (check-equal? (execute (compile `(= (first (cons 1 2)) (second (cons 1 2))))) #f)
   (check-equal? (execute (compile `(let ((x 1) (y 1) (z 2)) (= x y)))) #t)
-  (check-equal? (execute (compile `(let ((x 1) (y 1) (z 2)) (= x z)))) #f)|#)
+  (check-equal? (execute (compile `(let ((x 1) (y 1) (z 2)) (= x z)))) #f))
   
 

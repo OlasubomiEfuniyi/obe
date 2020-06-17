@@ -254,8 +254,11 @@ int64_t compBignum(int64_t arg0, int64_t arg1) {
 	mpz_set_ui(result2, 0);
 
 	/* Make sure that both arguments are pointers to bingums */
-	assert(((arg0 & result_mask) == type_bignum) && (arg1 & result_mask) == type_bignum);
-	
+	if(((arg0 & result_mask) != type_bignum)  || ((arg1 & result_mask) != type_bignum)) {
+		error();
+	}
+
+
 	/* Untag the arguments */
 	arg0 = arg0 ^ type_bignum;
 	arg1 = arg1 ^ type_bignum;
@@ -273,7 +276,9 @@ int64_t compBignum(int64_t arg0, int64_t arg1) {
 	return comp_res;
 }
 
+int64_t listEqual(int64_t arg0, int64_t arg1) { return 0;}
 
+int64_t pairEqual(int64_t arg0, int64_t arg1) { return 0;}
 /* Print a value. If printEmpty is true, print the empty list symbol, otherwise do not */
 void printValue(int64_t value) {
 	switch(value & result_mask) {
