@@ -26,7 +26,8 @@ void printBignum(int64_t value);
 void printValue(int64_t value);
 void printList(int64_t value);
 void printPair(int64_t value);
-
+int64_t compValue(int64_t value1, int64_t value2);
+int comBignum(int64_t arg0, int64_t arg1);
 int error(void);
 int runtimeSystemError(void);
 
@@ -276,9 +277,47 @@ int64_t compBignum(int64_t arg0, int64_t arg1) {
 	return comp_res;
 }
 
-int64_t listEqual(int64_t arg0, int64_t arg1) { return 0;}
+/* Determine if two lists are equal by comparing successive pairs of elements. 
+Returns 0 if they are equal and -1 otherwise*/
+int64_t listEqual(int64_t arg0, int64_t arg1) {
+	int64_t* a0 = (int64_t*)(arg0 ^ type_list);
+	int64_t* a1 = (int64_t*)(arg1 ^ type_list);
 
-int64_t pairEqual(int64_t arg0, int64_t arg1) { return 0;}
+	if((arg0 == type_empty_list && arg1 != type_empty_list) || 
+		(arg0 != type_empty_list && arg1 == type_empty_list)) {
+		return -1;
+	} else if(arg0 == type_empty_list && arg1 == type_empty_list) {
+		return 0;
+	} else if(compValue(*a0, *a1) != 0) {
+		return -1;
+	} else {
+		return listEqual(*(a0 + 1), *(a1 + 1));
+	}
+}
+
+/* Determine if two pairs are equal by comparing successive pairs of elements.
+Returns -1 if not equal and 0 if it is. */
+int64_t pairEqual(int64_t arg0, int64_t arg1) { 
+	int64_t* a0 = (int64_t*)(arg0 ^ type_pair);
+	int64_t* a1 = (int64_t*)(arg1 ^ type_pair);
+	
+	//Cpmpare the first value of each pair
+	if(compValue(*a0, *a1) != 0) {
+		return -1;
+	} 
+
+	if(((((*(a0 + 1)) & result_mask) == type_pair) && 
+		(((*(a1 + 1)) & result_mask) != type_pair)) ||
+	   ((((*(a0 + 1)) & result_mask) != type_pair) && 
+		(((*(a1 + 1)) & result_mask) == type_pair))) {
+		return -1;
+	} else if(((((*(a0 + 1)) & result_mask) != type_pair) && 
+		(((*(a1 + 1)) & result_mask) != type_pair))) { 
+		return compValue(*(a0 + 1), *(a1 + 1));
+	} else {
+		return pairEqual(*(a0 + 1), *(a1 + 1));
+	}
+}
 /* Print a value. If printEmpty is true, print the empty list symbol, otherwise do not */
 void printValue(int64_t value) {
 	switch(value & result_mask) {
@@ -398,6 +437,28 @@ void rotateString(char* str) {
 			str[i] = temp;
 		}	
 
+	}
+}
+
+/* Determine which comparison function to use based on the type of value to be compared */
+int64_t compValue(int64_t value1, int64_t value2) {
+	switch(value1 & result_mask) {
+		case type_bignum:
+			return compBignum(value1, value2);
+		case type_list:
+			return listEqual(value1, value2);
+		case type_pair:
+			return pairEqual(value1, value2);
+		case type_true:
+		case type_false:
+		case type_empty_list:
+			if(value1 == value2) {
+				return type_true;
+			} else {
+				return type_false;
+			}
+		default:
+			error();
 	}
 }
 

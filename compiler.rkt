@@ -687,7 +687,7 @@ type Variable =
 (define (compile-equal e1 e2 env)
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
-        (stack-size (* 8 (+ 3 (length env))))
+        (stack-size (* 8 (+ 4 (length env))))
         (false (gensym "false"))
         (end (gensym "end"))
         (bignum (gensym "bignum"))
@@ -702,9 +702,10 @@ type Variable =
       (mov (offset rsp ,(- (add1 (length env)))) rax)
 
       ,@c2
-
+      (mov (offset rsp ,(- (+ 2 (length env)))) rax)
+      
       (mov r10 (offset rsp ,(- (add1 (length env)))))
-      (mov r11 rax)
+      (mov r11 (offset rsp ,(- (+ 2 (length env)))))
 
       (and r10 ,type-mask)
       (and r11 ,type-mask)
@@ -715,14 +716,13 @@ type Variable =
       (mov r15 rsp) ;;The function being called will take care of setting and restoring rbp
 
       ;;Save the registers used to pass in arguments
-      (mov (offset rsp ,(- (+ 2 (length env)))) rdi)
-      (mov (offset rsp ,(- (+ 3 (length env)))) rsi)
+      (mov (offset rsp ,(- (+ 3 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 4 (length env)))) rsi)
 
       ;;Call compBignum
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;Pass the first argument
       (mov rsi rax) ;;Pass the second argument
 
-      (sub rsp ,stack-size)
 
       (cmp r10 ,type-bignum)
       (je ,bignum)
@@ -738,14 +738,17 @@ type Variable =
       (je ,simple)
       
       ,bignum
+      (sub rsp ,stack-size)
       (call compBignum)
       (jmp ,continue)
       
       ,list
+      (sub rsp ,stack-size)
       (call listEqual)
       (jmp ,continue)
       
       ,pair
+      (sub rsp ,stack-size)
       (call pairEqual)
       (jmp ,continue)
       
@@ -768,8 +771,8 @@ type Variable =
       (mov rsp r15)
 
       ;;Restore the registers used to pass arguments
-      (mov rdi (offset rsp ,(- (+ 2 (length env)))))
-      (mov rsi (offset rsp ,(- (+ 3 (length env)))))
+      (mov rdi (offset rsp ,(- (+ 3 (length env)))))
+      (mov rsi (offset rsp ,(- (+ 4 (length env)))))
 
       ;;Determine the appropriate boolean value to return
       (mov rbx 0)
@@ -1265,17 +1268,17 @@ type Variable =
   (check-equal? (execute (compile `(= 5 5))) #t)
   (check-equal? (execute (compile `(= #t #t))) #t)
   (check-equal? (execute (compile `(= #t #f))) #f)
-  ;;(check-equal? (execute (compile `(= '(1 2 3 4 5) '(1 2 3 4 5)))) #t)
-  ;;(check-equal? (execute (compile `(= '(1 2) '(1)))) #f)
-  ;;(check-equal? (execute (compile `(= (cons 1 (cons 2 (cons 3 '())))) (cons 1 (cons 2 (cons 3 '()))))) #t)
-  ;;(check-equal? (execute (compile `(= (head '(1 2 3)) 1))) #t)
+  (check-equal? (execute (compile `(= '(1 2 3 4 5) '(1 2 3 4 5)))) #t)
+  (check-equal? (execute (compile `(= '(1 2) '(1)))) #f)
+  (check-equal? (execute (compile `(= (cons 1 (cons 2 (cons 3 '()))) (cons 1 (cons 2 (cons 3 '())))))) #t)
+  (check-equal? (execute (compile `(= (head '(1 2 3)) 1))) #t)
   (check-equal? (execute (compile `(= (head '(1 2 3)) (tail '(1 2 3))))) #f)
-  ;;(check-equal? (execute (compile `(= (tail '(1 2 3) '(2 3))))) #t)
+  (check-equal? (execute (compile `(= (tail '(1 2 3)) '(2 3)))) #t)
   (check-equal? (execute (compile `(= '() '()))) #t)
-  ;;(check-equal? (execute (compile `(= '() (tail '(1))))) #t)
+  (check-equal? (execute (compile `(= '() (tail '(1))))) #t)
   (check-equal? (execute (compile `(= (add 1 2) (add 3 0)))) #t)
-  ;;(check-equal? (execute (compile `(= (cons 1 2) (cons 1 2)))) #t)
-  ;;(check-equal? (execute (compile `(= (cons 1 2) (cons 2 1)))) #f)
+  (check-equal? (execute (compile `(= (cons 1 2) (cons 1 2)))) #t)
+  (check-equal? (execute (compile `(= (cons 1 2) (cons 2 1)))) #f)
   (check-equal? (execute (compile `(= (cons 1 (cons 2 (cons 3 4))) '(1 2 3 4)))) #f)
   (check-equal? (execute (compile `(= (first (cons 1 2)) (add 0 1)))) #t)
   (check-equal? (execute (compile `(= (first (cons 1 2)) (second (cons 1 2))))) #f)
