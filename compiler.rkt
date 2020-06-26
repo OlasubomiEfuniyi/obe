@@ -166,6 +166,10 @@ type Variable =
 (define (compile expr)
   `(,@(compile-e (desugar expr) '()) ;;Start with empty environment
     ;;Since rsp is never moved beyond the initial stack fram setup, this sould revert the setup
+    (pop r15)
+    (pop r14)
+    (pop r13)
+    (pop r12)
     (pop rsi)
     (pop rdi)
     (pop rbx)
@@ -448,7 +452,8 @@ type Variable =
          ;;heap at a 64 bit boundry
          (num-string-padded (string-append num-string padding))
          ;;Using the padded num-string ensures that rdi remains at an 8 byte boundary
-         (num-list (string->list num-string-padded)))
+         (num-list (string->list num-string-padded))
+         (stack-size (* 8 (+ 2 (length env)))))
     `(
       ;;Save the pointer to the beginning of the list
       (mov rax rdi)
@@ -459,7 +464,36 @@ type Variable =
       (mov rbx 0)
       (mov (offset rdi 0) rbx)
       (add rdi 1) ;;So that rdi points to the next free position on the heap, not the last character
-      ;;Tag the result as a bignum
+      
+      ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Call the C function to compile a bignum into a GMP struct;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+      ;;Save the values in the registers used to pass arguments
+      (mov (offset rsp ,(- (add1 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 2 (length env)))) rsi)
+
+      ;;Store arguments in the registers used to pass arguments to the function
+      (mov rdi rax);;Pointer to the begining of the string rep of the bignum
+      (mov rsi rdi);;Pointer to the next available space on the heap where the GPM struct will go
+
+      (mov r15 rsi);;Save a copy of the address of the struct in r15
+
+      ;;Setup the stack for the call
+      (sub rsp ,stack-size)
+      (call compileBignum)
+
+
+      ;;Restore the stack after the call
+      (add rsp ,stack-size)
+
+      ;;Restore the registers that were used to pass arguments
+      (mov rdi (offset rsp ,(- (add1 (length env)))))
+      (mov rsi (offset rsp ,(- (+ 2 (length env)))))
+
+      ;;make rdi point to the next avialable position on the heap
+      (add rdi rax)
+
+      
+      ;;Tag the result as a gmp_struct
+      (mov rax r15)
       (or rax ,type-bignum))))
 
 
@@ -484,11 +518,13 @@ type Variable =
         (end (gensym "end")))
     `(,@c1
       ,@assert-bignum
+      (xor rax ,type-bignum);;Untag the pointer
       ;;Save the result of evaluating the first expression on the stack
       (mov (offset rsp ,(- (add1 (length env)))) rax)
 
       ,@c2
       ,@assert-bignum
+      (xor rax ,type-bignum);;Untag the pointer
       ;;Save the stack
       (mov r15 rsp) ;;The function being called will take care of setting and restoring rbp
 
@@ -536,11 +572,13 @@ type Variable =
         (end (gensym "end")))
     `(,@c1
       ,@assert-bignum
+      (xor rax ,type-bignum);;Untag the pointer
       ;;Save the result of evaluating the first expression on the stack
       (mov (offset rsp ,(- (add1 (length env)))) rax)
 
       ,@c2
       ,@assert-bignum
+      (xor rax ,type-bignum);;Untag the pointer
       ;;Save the stack
       (mov r15 rsp) ;;The function being called will take care of setting and restoring rbp
 
@@ -588,11 +626,13 @@ type Variable =
         (end (gensym "end")))
     `(,@c1
       ,@assert-bignum
+      (xor rax ,type-bignum);;Untag the pointer
       ;;Save the result of evaluating the first expression on the stack
       (mov (offset rsp ,(- (add1 (length env)))) rax)
 
       ,@c2
       ,@assert-bignum
+      (xor rax ,type-bignum);;Untag the pointer
       ;;Save the stack
       (mov r15 rsp) ;;The function being called will take care of setting and restoring rbp
 
@@ -640,11 +680,13 @@ type Variable =
         (end (gensym "end")))
     `(,@c1
       ,@assert-bignum
+      (xor rax ,type-bignum);;Untag the pointer
       ;;Save the result of evaluating the first expression on the stack
       (mov (offset rsp ,(- (add1 (length env)))) rax)
 
       ,@c2
       ,@assert-bignum
+      (xor rax ,type-bignum);;Untag the pointer
       ;;Save the stack
       (mov r15 rsp) ;;The function being called will take care of setting and restoring rbp
 
@@ -738,6 +780,18 @@ type Variable =
       (je ,simple)
       
       ,bignum
+      ;;Untag the pointers to the bignums since this is what compBignum expects
+      (mov rax (offset rsp ,(- (add1 (length env)))))
+      ,@assert-bignum
+      (xor rax ,type-bignum)
+      (mov rdi rax)
+
+      (mov rax (offset rsp ,(- (+ 2 (length env)))))
+      ,@assert-bignum
+      (xor rax ,type-bignum)
+      (mov rsi rax)
+
+      ;;Call compBignum
       (sub rsp ,stack-size)
       (call compBignum)
       (jmp ,continue)
@@ -790,107 +844,111 @@ type Variable =
 (define (compile-add e1 e2 env)
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
-        (stack-size (* 8 (+ 4 (length env)))))
+        (stack-size (* 8 (+ 5 (length env)))))
     `(,@c1
+      ,@assert-bignum
+      ;;Untag the address before placing it on the stack
+      (xor rax ,type-bignum)
       (mov (offset rsp ,(- (add1 (length env)))) rax) ;;Save the result of evaluating the first expression on the stack to prevent clobbering
-      
+
       ,@c2
-      
-      ;;Save the stack
-      (mov r15 rsp) ;;The function being called will take care of setting and restoring rbp
+      ,@assert-bignum
+      ;;Untag the address before placing it on the stack
+      (xor rax ,type-bignum)
+      (mov (offset rsp ,(- (+ 2 (length env)))) rax) ;;Save the result of evaluating the second expression on the stack to prevent loss when external functions are called
 
       ;;Save the registers used to pass in arguments
-      (mov (offset rsp ,(- (+ 2 (length env)))) rdi) 
-      (mov (offset rsp ,(- (+ 3 (length env)))) rsi)
-      (mov (offset rsp ,(- (+ 4 (length env)))) rdx)
-      
-      ;;Call add-bignum rdi already contains a pointer to the next free position on the heap
-      ;;This will be our first iargument
-      (mov rdi (offset rsp ,(- (+ 2 (length env)))))
-      (mov rsi (offset rsp ,(- (add1 (length env))))) ;;First bignum
-      (mov rdx rax);;Second bignum
+      (mov (offset rsp ,(- (+ 3 (length env)))) rdi) 
+      (mov (offset rsp ,(- (+ 4 (length env)))) rsi)
+      (mov (offset rsp ,(- (+ 5 (length env)))) rdx)
 
-
-      
+      ;;Setup for the gmp function calls required to add two bignums.
+      ;;No need to do anything with rdi since it already contains the address of
+      ;;the next free position on the heap
       (sub rsp ,stack-size);;Make rsp point to the top of the stack
-      (call addBignum)
 
-  
-      ;;Make sure the stack is as expected and then restore the stack
-      ;;stack pointer to where it was before the setup for the function
-      ;;call
-      (mov rbx r15)
-      (sub rbx rsp)
-      (cmp rbx ,stack-size)
-      (jne err)
-      (mov rsp r15)
+      ;;initialize the gpm struct in the next free position on the heap, i.e the address pointed to by rdi
+      (call my_mpz_init)
+     
+      ;;add the two bignums and save the result in the newly initialized struct
+      (add rsp ,stack-size) ;;Restore the stack to access the arguments for calling the addition function
+      (mov rdi (offset rsp ,(- (+ 3 (length env)))))
+      (mov rsi (offset rsp ,(- (add1 (length env))))) ;;Untagged pointer to the first bignum
+      (mov rdx (offset rsp ,(- (+ 2 (length env))))) ;;Untagged pointer to the second bignum
+
+      (sub rsp ,stack-size) 
+      (call my_mpz_add) ;;First arg is the address of the struct where the result should be placed, second arg is the first bignum, third arg is the second bignum
+
+      ;;Restore the stack
+      (add rsp ,stack-size)
 
       ;;Restore the registers used to pass arguments
-      (mov rdi (offset rsp ,(- (+ 2 (length env)))))
-      (mov rsi (offset rsp ,(- (+ 3 (length env)))))
-      (mov rdx (offset rsp ,(- (+ 4 (length env)))))
+      (mov rdi (offset rsp ,(- (+ 3 (length env)))))
+      (mov rsi (offset rsp ,(- (+ 4 (length env)))))
+      (mov rdx (offset rsp ,(- (+ 5 (length env)))))
 
-      ;;Set rdi to point to the next free position on the heap
-      ;;rax contains the length of the bignum string, including the null character. The addition
-      ;;should keep rdi at a 64 bit boundry
-      (add rdi rax)
+      ;;Set rdi to the next free position on the heap. Add 16 because an mpz_t has a
+      ;;size of 16 bytes. This may change in the future
+      (add rdi 16)
       
       ;;Return a tagged pointer to the result on the heap
-      (mov rax (offset rsp ,(- (+ 2 (length env)))))
+      (mov rax (offset rsp ,(- (+ 3 (length env)))))
       (or rax ,type-bignum))))
 
 ;;Compile the subtraction of two bignums
 ;;Expr Expr CEnv-> ASM
 (define (compile-sub e1 e2 env)
-  (let ((c1 (compile-e e1 env))
+   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
-        (stack-size (* 8 (+ 4 (length env)))))
+        (stack-size (* 8 (+ 5 (length env)))))
     `(,@c1
+      ,@assert-bignum
+      ;;Untag the address before placing it on the stack
+      (xor rax ,type-bignum)
       (mov (offset rsp ,(- (add1 (length env)))) rax) ;;Save the result of evaluating the first expression on the stack to prevent clobbering
-      
+
       ,@c2
-      
-      ;;Save the stack
-      (mov r15 rsp) ;;The function being called will take care of setting and restoring rbp
+      ,@assert-bignum
+      ;;Untag the address before placing it on the stack
+      (xor rax ,type-bignum)
+      (mov (offset rsp ,(- (+ 2 (length env)))) rax) ;;Save the result of evaluating the second expression on the stack to prevent loss when external functions are called
 
       ;;Save the registers used to pass in arguments
-      (mov (offset rsp ,(- (+ 2 (length env)))) rdi)  ;;Store a pointer to the beginning of the result on the stack
-      (mov (offset rsp ,(- (+ 3 (length env)))) rsi)
-      (mov (offset rsp ,(- (+ 4 (length env)))) rdx)
-      
-      ;;Call add-bignum rdi already contains a pointer to the next free position on the heap
-      ;;This will be our first iargument
-      (mov rdi (offset rsp ,(- (+ 2 (length env)))))
-      (mov rsi (offset rsp ,(- (add1 (length env))))) ;;First bignum
-      (mov rdx rax);;Second bignum
+      (mov (offset rsp ,(- (+ 3 (length env)))) rdi) 
+      (mov (offset rsp ,(- (+ 4 (length env)))) rsi)
+      (mov (offset rsp ,(- (+ 5 (length env)))) rdx)
 
-
-      
+      ;;Setup for the gmp function calls required to add two bignums.
+      ;;No need to do anything with rdi since it already contains the address of
+      ;;the next free position on the heap
       (sub rsp ,stack-size);;Make rsp point to the top of the stack
-      (call subBignum)
 
-  
-      ;;Make sure the stack is as expected and then restore the stack
-      ;;stack pointer to where it was before the setup for the function
-      ;;call
-      (mov rbx r15)
-      (sub rbx rsp)
-      (cmp rbx ,stack-size)
-      (jne err)
-      (mov rsp r15)
+      ;;initialize the gpm struct in the next free position on the heap, i.e the address pointed to by rdi
+      (call my_mpz_init)
+     
+      ;;add the two bignums and save the result in the newly initialized struct
+      (add rsp ,stack-size) ;;Restore the stack to access the arguments for calling the addition function
+      (mov rdi (offset rsp ,(- (+ 3 (length env)))))
+      (mov rsi (offset rsp ,(- (add1 (length env))))) ;;Untagged pointer to the first bignum
+      (mov rdx (offset rsp ,(- (+ 2 (length env))))) ;;Untagged pointer to the second bignum
+
+      (sub rsp ,stack-size) 
+      (call my_mpz_sub) ;;First arg is the address of the struct where the result should be placed, second arg is the first bignum, third arg is the second bignum
+
+      ;;Restore the stack
+      (add rsp ,stack-size)
 
       ;;Restore the registers used to pass arguments
-      (mov rdi (offset rsp ,(- (+ 2 (length env)))))
-      (mov rsi (offset rsp ,(- (+ 3 (length env)))))
-      (mov rdx (offset rsp ,(- (+ 4 (length env)))))
+      (mov rdi (offset rsp ,(- (+ 3 (length env)))))
+      (mov rsi (offset rsp ,(- (+ 4 (length env)))))
+      (mov rdx (offset rsp ,(- (+ 5 (length env)))))
 
-      ;;Set rdi to point to the next free position on the heap
-      ;;rax contains the length of the bignum string, including the null character. The addition
-      ;;should keep rdi at a 64 bit boundry
-      (add rdi rax)
+      ;;Set rdi to the next free position on the heap. Add 16 because an mpz_t has a
+      ;;size of 16 bytes. This may change in the future
+      (add rdi 16)
       
       ;;Return a tagged pointer to the result on the heap
-      (mov rax (offset rsp ,(- (+ 2 (length env)))))
+      (mov rax (offset rsp ,(- (+ 3 (length env)))))
       (or rax ,type-bignum))))
   
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Assertions;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1064,7 +1122,8 @@ type Variable =
   ;;Test bignum
   (check-equal? (execute (compile 9223372036854775807)) 9223372036854775807)
   (check-equal? (execute (compile -9223372036854775807)) -9223372036854775807)
-  
+
+ 
   ;;Test add
   (check-equal? (execute (compile `(add 5 8))) 13)
   (check-equal? (execute (compile `(add 1152921504606846974 1))) 1152921504606846975)
@@ -1085,7 +1144,6 @@ type Variable =
                                              (add 2853048683549688806050333973689826037985224241631
                                                   (add 2853048683549688806050333973689826037985224241631
                                                        (add 2853048683549688806050333973689826037985224241631 #f))))))) 'err)
-
   ;;Test sub
   (check-equal? (execute (compile `(sub 2 1))) 1)
   (check-equal? (execute (compile `(sub 110 10))) 100)

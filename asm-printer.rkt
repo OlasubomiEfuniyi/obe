@@ -72,7 +72,9 @@ type Register
   (require rackunit))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Assembly conversion functions;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (define (assembly compiled-prog)
-  (string-append "\tglobal entry\n \textern error\n \textern addBignum\n \textern subBignum\n \textern rotateString\n \textern compBignum\n \textern listEqual\n \textern pairEqual\nS \tsection .text\n entry:\n \tpush rbp\n \tmov rbp, rsp\n \tpush rbx\n \tpush rdi\n \tpush rsi\n" (asm->assembly compiled-prog)))
+  (string-append "\tglobal entry\n \textern error\n \textern compileBignum\n \textern addBignum\n \textern subBignum\n \textern rotateString\n \textern compBignum\n "
+                 "\textern listEqual\n \textern pairEqual\n \textern my_mpz_init\n \textern my_mpz_add\n \textern my_mpz_sub\n \tsection .text\n entry:\n \tpush rbp\n \tmov rbp, rsp\n \tpush rbx\n \tpush rdi\n \tpush rsi\n \tpush r12\n "
+                 "\tpush r13\n \tpush r14\n \tpush r15\n" (asm->assembly compiled-prog)))
 
 ;;Conver a list of ASM to assembly strin
 ;;Listof(ASM) -> string
@@ -189,7 +191,7 @@ type Register
 ;;Symbol -> boolean
 (define (register? r)
   (match r
-    [(or 'rax 'rdi 'rsi 'rbx 'rdx 'rsp 'rbp 'r9 'r8 'r10 'r11 'r15 'r14) #t]
+    [(or 'rax 'rdi 'rsi 'rbx 'rdx 'rsp 'rbp 'r9 'r8 'r10 'r11 'r12 'r13 'r15 'r14) #t]
     [_ #f]))
 
 ;;Determine if the argument is an arithmetic instruction

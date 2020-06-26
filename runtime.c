@@ -54,8 +54,55 @@ int main(int argc, char** argv) {
 	return 0;
 }
 
+void my_mpz_init(int64_t x) { 
+	mpz_init(*((mpz_t*) x));
+}
 
-/* Add two big nums and return the length of the result string  */
+void my_mpz_add(int64_t rop, int64_t op1, int64_t op2) {
+	assert(rop % 8 == 0);
+	assert(op1 % 8 == 0);
+	assert(op2 % 8 == 0);	
+
+	mpz_add(*((mpz_t *)rop), *((mpz_t*)op1), *((mpz_t*)op2));
+}
+
+void my_mpz_sub(int64_t rop, int64_t op1, int64_t op2) {
+	assert(rop % 8 == 0);
+	assert(op1 % 8 == 0);
+	assert(op2 % 8 == 0);	
+
+	mpz_sub(*((mpz_t *)rop), *((mpz_t*)op1), *((mpz_t*)op2));
+}
+
+
+/** Compile a bignum into a GMP structure pointer.
+    bn_str_ptr is a pointer to the string representation of the bignum.
+    bn_struct_ptr is a pointer to the location on the heap where the
+    struct will be saved.
+    Return the size of the GMP struct representing the big num
+*/
+
+int64_t compileBignum(int64_t bn_str_ptr, int64_t bn_struct_ptr) {
+	int flag = 0;
+
+	//Setup the GMP structure
+	mpz_t bn;
+
+	mpz_init(bn);
+	mpz_set_ui(bn, 0);
+	
+	//Use the string value of the bignum to setup the GMP struct
+	flag = mpz_set_str(bn, (char *)bn_str_ptr, 10);
+	if(flag != 0) {
+		runtimeSystemError();
+	}
+
+	//Put bn on the heap starting from the address in bn_struct_ptr
+	memcpy((void *)bn_struct_ptr, (void *)&bn, sizeof(bn));
+	return sizeof(bn); 
+}
+
+/* Add two big nums and return the length of the resulting   */
 int64_t  addBignum(int64_t arg0, int64_t  arg1, int64_t arg2) {
 	int flag; //To hold the result of parsing the return value as a base 10 number.
 	mpz_t result1;
@@ -244,35 +291,8 @@ int64_t  subBignum(int64_t arg0, int64_t  arg1, int64_t arg2) {
 
 /* Compare two bignums  */
 int64_t compBignum(int64_t arg0, int64_t arg1) {
-	mpz_t result1;
-	mpz_t result2;
-	int flag = 0;
-
-	mpz_init(result1);
-	mpz_init(result2);
-
-	mpz_set_ui(result1, 0);
-	mpz_set_ui(result2, 0);
-
-	/* Make sure that both arguments are pointers to bingums */
-	if(((arg0 & result_mask) != type_bignum)  || ((arg1 & result_mask) != type_bignum)) {
-		error();
-	}
-
-
-	/* Untag the arguments */
-	arg0 = arg0 ^ type_bignum;
-	arg1 = arg1 ^ type_bignum;
-	
-	/* Set the number using its string representation on the heap */
-	flag = mpz_set_str(result1, (char *) arg0, 10);
-	assert(flag == 0);
-
-	flag = mpz_set_str(result2, (char *) arg1, 10);
-	assert(flag == 0);
-
 	/* Return the result of comparing the two bignums using the mpz_cmp function from the GMP library */	
-	int comp_res =  mpz_cmp(result1, result2);
+	int comp_res =  mpz_cmp(*((mpz_t*)arg0), *((mpz_t*)arg1));
 
 	return comp_res;
 }
@@ -393,26 +413,12 @@ void  printPair(int64_t value) {
 
 }
 
-/* Given a pointer to a bignum string on the heap, print the value of the bignum */
+/* Given a pointer to a gmp struct, print the bignum it represents */
 void printBignum(int64_t value) {
-	int flag; //To hold the result of parsing the return value as a base 10 number.
-	mpz_t result;
-
-	/* Initialize thei number */
-	mpz_init(result);
-	mpz_set_ui(result, 0);
-
-
 	//Clear the tagging to get the address
-	value = (value ^ type_bignum);
-
-	//printf("%s\n", ((char*) value));
-	//Parse the value as a base 10 number, reading it directly from the heap
-	//from the beginning of the string to the null character
-	flag = mpz_set_str(result, ((char*) value), 10);
-	assert(flag == 0); //If the flag is not 0, then the operation failed 	
-
-	mpz_out_str(stdout,10,result);
+	mpz_t* result = (mpz_t*)(value ^ type_bignum);
+ 	
+	mpz_out_str(stdout,10,*result);
 }
 
 
@@ -444,7 +450,8 @@ void rotateString(char* str) {
 int64_t compValue(int64_t value1, int64_t value2) {
 	switch(value1 & result_mask) {
 		case type_bignum:
-			return compBignum(value1, value2);
+			//untag pointers to bignum as expected by compBignum
+			return compBignum((value1 ^ type_bignum), (value2 ^ type_bignum));
 		case type_list:
 			return listEqual(value1, value2);
 		case type_pair:
