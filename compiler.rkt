@@ -7,13 +7,17 @@
 
 (define shift 3)
 (define type-mask #b111)
-(define type-integer #b000)
+
+(define type-range-exclusive #b000)
 (define type-bignum #b001)
 (define type-true #b010)
 (define type-false #b011)
-(define type-empty-list #b111)
 (define type-list #b100)
 (define type-pair #b101)
+(define type-range-inclusive #b110)
+(define type-empty-list #b111)
+
+
 
 
 #|
@@ -51,6 +55,11 @@ type Value =
 |Boolean
 |'()
 |List
+|Range
+
+type Range =
+|`(.. Expr Expr) starting from first integer, not including the last integer. Both expressions must evaluate to an integer
+|`(..= Expr Expr) starting from first integer, including the last integer. Both expressions must evaluate to an integer
 
 type List =
 |``(Expr*)
@@ -59,8 +68,8 @@ type Pair =
 |(cons Expr Expr)
 
 type Arithmetic =
-|`(add integer integer)
-|`(sub integer integer)
+|`(add Expr Expr) Both expressions must evaluate to an integer
+|`(sub Expr Expr) Both expressions must evaluate to an integer
 
 type Decision =
 |`(if Expr Expr Expr)
@@ -107,7 +116,9 @@ type Variable =
     [(? boolean? b) b]
     [''() ''()]
     [`(quote ,lst) (list-literal-to-cons `,lst)]
-    [`(cons ,e1 ,e2) `(cons ,(desugar e1) ,(desugar e2))]))
+    [`(cons ,e1 ,e2) `(cons ,(desugar e1) ,(desugar e2))]
+    [`(.. ,e1 ,e2) `(.. ,(desugar e1) ,(desugar e2))]
+    [`(..= ,e1 ,e2) `(..= ,(desugar e1) ,(desugar e2))]))
 
 ;;Desugar an arithmetic operation
 ;;Arithmetic -> Arithmetic
@@ -202,7 +213,9 @@ type Variable =
     [(? num? expr) (compile-number expr env)]
     [(? boolean? expr) (compile-boolean expr)]
     [''() `((mov rax ,type-empty-list))]
-    [`(cons ,e1 ,e2) (compile-pair e1 e2 env)]))
+    [`(cons ,e1 ,e2) (compile-pair e1 e2 env)]
+    [`(.. ,e1 ,e2) (compile-range-not-inclusive e1 e2 env)]
+    [`(..= ,e1 ,e2) (compile-range-inclusive e1 e2 env)]))
 
 ;;Compile an arithmetic expression into ASM
 ;;Number CEnv -> ASM
@@ -432,7 +445,109 @@ type Variable =
     ,continue
     (mov rax (offset rax 1)))))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;:Compile Boolean;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile Range;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;Compile a range expression, starting from the first integer and not including the last integer
+;;Expr Expr CEnv -> ASM
+(define (compile-range-not-inclusive e1 e2 env)
+  (let ((c1 (compile-e e1 env))
+        (c2 (compile-e e2 (extend #f env)))
+        (stack-size (* 8 (+ 4 (length env)))))
+    `(,@c1
+      ,@assert-bignum
+      (xor rax ,type-bignum) ;;Untag the pointer to the bignum
+      (mov (offset rsp ,(- (add1 (length env)))) rax) ;;save the starting point of the range on the stack
+
+      ,@c2
+      ,@assert-bignum
+      (xor rax ,type-bignum) ;;Untag the pointer to the bignum
+      (mov (offset rsp ,(- (+ 2 (length env)))) rax) ;;save the ending point of the range on the stack
+      
+      ;;;;;;;;;;;;;Make sure the starting point is strictly less than the ending point usig compBignum;;;;;;;;;;;;;;;
+
+      ;;Prep for call to compBignum
+      (mov (offset rsp ,(- (+ 3 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 4 (length env)))) rsi)
+
+      (mov rdi (offset rsp ,(- (add1 (length env))))) ;;pass the starting point of the range in rdi
+      (mov rsi (offset rsp ,(- (+ 2 (length env))))) ;;pass the ending point of the range in rdi
+
+      (sub rsp ,stack-size)
+      (call compBignum)
+      (add rsp ,stack-size)
+
+      ;;Restore the registers used to pass arguments to compBignum
+      (mov rdi (offset rsp ,(- (+ 3 (length env)))))
+      (mov rsi (offset rsp ,(- (+ 4 (length env)))))
+
+      ;;Use the result of compBignum to check that the starting point is strictly less than the ending point
+      (cmp rax 0)
+      (jge err) ;;If the return value is greater than or equal to 0, starting point is greater than or equal to ending point
+
+
+      ;;Create the range on the heap and return a pointer to it. Each gmp struct is 16 bits so rdi still remains a multiple of 8
+      (mov rax (offset rsp ,(- (add1 (length env)))))
+      (or rax ,type-bignum)
+      (mov (offset rdi 0) rax)
+      (mov rax (offset rsp ,(- (+ 2 (length env)))))
+      (or rax ,type-bignum)
+      (mov (offset rdi 1) rax)
+
+      (mov rax rdi)
+      (or rax ,type-range-exclusive)
+      (add rdi 32)))) ;;Make rdi point to the next free position on the heap
+      
+
+;;Compile a range expression, starting from the first integer and including the last integer
+;;Expr Expr CEnv -> ASM
+(define (compile-range-inclusive e1 e2 env)
+  (let ((c1 (compile-e e1 env))
+        (c2 (compile-e e2 (extend #f env)))
+        (stack-size (* 8 (+ 4 (length env)))))
+    `(,@c1
+      ,@assert-bignum
+      (xor rax ,type-bignum) ;;Untag the pointer to the bignum
+      (mov (offset rsp ,(- (add1 (length env)))) rax) ;;save the starting point of the range on the stack
+
+      ,@c2
+      ,@assert-bignum
+      (xor rax ,type-bignum) ;;Untag the pointer to the bignum
+      (mov (offset rsp ,(- (+ 2 (length env)))) rax) ;;save the ending point of the range on the stack
+      
+      ;;;;;;;;;;;;;Make sure the starting point is less than or equal to the ending point usig compBignum;;;;;;;;;;;;;;;
+
+      ;;Prep for call to compBignum
+      (mov (offset rsp ,(- (+ 3 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 4 (length env)))) rsi)
+
+      (mov rdi (offset rsp ,(- (add1 (length env))))) ;;pass the starting point of the range in rdi
+      (mov rsi (offset rsp ,(- (+ 2 (length env))))) ;;pass the ending point of the range in rdi
+
+      (sub rsp ,stack-size)
+      (call compBignum)
+      (add rsp ,stack-size)
+
+      ;;Restore the registers used to pass arguments to compBignum
+      (mov rdi (offset rsp ,(- (+ 3 (length env)))))
+      (mov rsi (offset rsp ,(- (+ 4 (length env)))))
+
+      ;;Use the result of compBignum to check that the starting point is less than or equal to the ending point
+      (cmp rax 0)
+      (jg err) ;;If the return value is greater than or equal to 0, starting point is greater than or equal to ending point
+
+
+      ;;Create the range on the heap and return a pointer to it. Each gmp struct is 16 bits so rdi still remains a multiple of 8
+      (mov rax (offset rsp ,(- (add1 (length env)))))
+      (or rax ,type-bignum)
+      (mov (offset rdi 0) rax)
+      (mov rax (offset rsp ,(- (+ 2 (length env)))))
+      (or rax ,type-bignum)
+      (mov (offset rdi 1) rax)
+
+      (mov rax rdi)
+      (or rax ,type-range-inclusive)
+      (add rdi 32)))) ;;Make rdi point to the next free position on the heap
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile Boolean;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Compile a boolean into assembly, placing the value in rax
 ;;Boolean -> ASM
 (define (compile-boolean b)
@@ -951,14 +1066,7 @@ type Variable =
       (mov rax (offset rsp ,(- (+ 3 (length env)))))
       (or rax ,type-bignum))))
   
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Assertions;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;A variable that holds ASM for confirming that the value in rax is an integer
-(define assert-integer
-  `((mov rbx rax)
-    (and rbx ,type-mask)
-    (cmp rbx ,type-integer)
-    (jne err)))
-
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Assertions;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;A variable that hods ASM for confirming that the value in rax is a bignum
 (define assert-bignum
   `((mov rbx rax)
@@ -1088,6 +1196,8 @@ type Variable =
       (match expr
         [`(quote ,expr ...) #t]
         [`(cons ,e1 ,e2) #t]
+        [`(.. ,e1 ,e2) #t]
+        [`(..= ,e1 ,e2) #t]
         [_ #f])))
 
 ;;Determine if the expression is a list-op
@@ -1341,6 +1451,32 @@ type Variable =
   (check-equal? (execute (compile `(= (first (cons 1 2)) (add 0 1)))) #t)
   (check-equal? (execute (compile `(= (first (cons 1 2)) (second (cons 1 2))))) #f)
   (check-equal? (execute (compile `(let ((x 1) (y 1) (z 2)) (= x y)))) #t)
-  (check-equal? (execute (compile `(let ((x 1) (y 1) (z 2)) (= x z)))) #f))
+  (check-equal? (execute (compile `(let ((x 1) (y 1) (z 2)) (= x z)))) #f)
+
+  ;;Test Range ..
+  (check-equal? (execute (compile `(.. 5 6))) `(5..6))
+  (check-equal? (execute (compile `(.. (add 1 0) (add 1 2)))) `(1..3))
+  (check-equal? (execute (compile `(.. (add 1 (sub 5 6)) 8))) `(0..8))
+  (check-equal? (execute (compile `(.. '(1 2 3) 5))) 'err)
+  (check-equal? (execute (compile `(.. 5 '(1 2 3)))) 'err)
+  (check-equal? (execute (compile `(.. '(1 2 3) '()))) 'err)
+  (check-equal? (execute (compile `(.. 5 4))) 'err)
+  (check-equal? (execute (compile `(.. 5 5))) 'err)
+  (check-equal? (execute (compile `(.. (add 1 (add 2 3)) (add 1 (add 2 2))))) 'err)
+  (check-equal? (execute (compile `(.. (if #t 100 #f) (let ((x 7)) (add x 100))))) '(100..107))
+  (check-equal? (execute (compile `(.. (head '(1 2 3)) 5))) '(1..5))
+
+  ;;Test Range ..=
+  (check-equal? (execute (compile `(..= 5 6))) `(5..=6))
+  (check-equal? (execute (compile `(..= (add 1 0) (add 1 2)))) `(1..=3))
+  (check-equal? (execute (compile `(..= (add 1 (sub 5 6)) 8))) `(0..=8))
+  (check-equal? (execute (compile `(..= '(1 2 3) 5))) 'err)
+  (check-equal? (execute (compile `(..= 5 '(1 2 3)))) 'err)
+  (check-equal? (execute (compile `(..= '(1 2 3) '()))) 'err)
+  (check-equal? (execute (compile `(..= 5 4))) 'err)
+  (check-equal? (execute (compile `(..= 5 5))) '(5..=5))
+  (check-equal? (execute (compile `(..= (add 1 (add 2 3)) (add 1 (add 2 2))))) 'err)
+  (check-equal? (execute (compile `(..= (if #t 100 #f) (let ((x 7)) (add x 100))))) '(100..=107))
+  (check-equal? (execute (compile `(..= (head '(1 2 3)) 5))) '(1..=5)))
   
 
