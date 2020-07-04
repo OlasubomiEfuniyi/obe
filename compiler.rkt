@@ -8,13 +8,12 @@
 (define shift 3)
 (define type-mask #b111)
 
-(define type-range-exclusive #b000)
 (define type-bignum #b001)
 (define type-true #b010)
 (define type-false #b011)
 (define type-list #b100)
 (define type-pair #b101)
-(define type-range-inclusive #b110)
+(define type-range #b110)
 (define type-empty-list #b111)
 
 
@@ -24,6 +23,8 @@
 type CEnv = Listof(Symbol)
 
 type Expr =
+|Display
+|Loop
 |Value
 |Logic
 |Arithmetic
@@ -32,6 +33,12 @@ type Expr =
 |Variable
 |ListOp
 |PairOp
+
+type Display =
+|`(println Expr)
+
+type Loop =
+|`(for Variable in Expr do Expr+) where the Expr after in is expected to evaluate to a range
 
 type Logic =
 |`(>  Expr Expr) where both arguments evaluate to a Number
@@ -106,6 +113,8 @@ type Variable =
     [(? list-op? expr) (desugar-list-op expr)]
     [(? pair-op? expr) (desugar-pair-op expr)]
     [(? logic? expr) (desugar-logic expr)]
+    [(? display? expr) (desugar-display expr)]
+    [(? loop? expr) (desugar-loop expr)]
     [_ (error "Invalid Program")]))
 
 ;;Desugar a value
@@ -165,6 +174,18 @@ type Variable =
     [`(<= ,e1 ,e2) `(<= ,(desugar e1) ,(desugar e2))]
     [`(= ,e1 ,e2) `(= ,(desugar e1) ,(desugar e2))]))
 
+;;Desugar a display expression
+;;Display -> Display
+(define (desugar-display expr)
+  (match expr
+    [`(println ,e1) `(println ,(desugar e1))]))
+
+;;Desugar a loop expression
+;;Loop -> Loop
+(define (desugar-loop expr)
+  (match expr
+    [`(for ,v in ,expr do ,exprs ..1) `(for ,v in ,(desugar expr) do ,@(map desugar exprs))]))
+
 (define (list-literal-to-cons lst)
   (match lst
     ['() ''()]
@@ -203,6 +224,8 @@ type Variable =
     [(? list-op? expr) (compile-list-op expr env)]
     [(? pair-op? expr) (compile-pair-op expr env)]
     [(? logic? expr) (compile-logic expr env)]
+    [(? display? expr) (compile-display expr env)]
+    [(? loop? expr) (compile-loop expr env)]
     [_ (error "Invalid Program")]))
 
 
@@ -231,7 +254,108 @@ type Variable =
     ;;Every integer is treated as a bignum
     [(? integer? num) (compile-bignum num env)]))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;:::::Compile LetBinding;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile Loop;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;Compile a loop expression
+;;Loop CEnv -> ASM
+(define (compile-loop expr env)
+  (match expr
+    [`(for ,v in ,e-rng do ,exprs ..1) (compile-for v e-rng exprs env)]))
+
+;;Compile a for expression
+;;Variable Expr ListOf(Expr) CEnv -> ASM
+(define (compile-for v e-rng exprs env)
+  (let ((c-rng (compile-e e-rng env))
+        ;;reserve four spots on the stack where the beginning of the range, end of the range, rdi and rsi will reside.
+        (c-exprs (compile-es exprs (extend #f (extend #f (extend #f (extend v env))))))
+        (end (gensym "end"))
+        (loop (gensym "loop"))
+        (stack-size (* 8 (+ 4 (length env)))))
+
+    `(,@c-rng ;;Compile the range
+      
+      ,@assert-range
+      
+      (xor rax ,type-range) ;;Untag the pointer to the range
+      
+      ;;;;;;;;;;;;;;;Loop over the range, making v represent each successive value in the range;;;;;;;;;;;;;;;;;;;;;;;
+      (mov rbx (offset rax 0)) ;;Move the beginning of the range into rbx
+      (mov rax (offset rax 1)) ;;Move the end of the range into rax.
+
+      ;;Always make sure that the current value of v is at offset 1 from the top of the stack and
+      ;;the end of the range is at offset 2 at the top of the stack.
+      ;;Save rdi and rsi at the top of the stack
+      (mov (offset rsp ,(- (add1 (length env)))) rbx)
+      (mov (offset rsp ,(- (+ 2 (length env)))) rax)
+      (mov (offset rsp ,(- (+ 3 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 4 (length env)))) rsi)
+      
+      ,loop
+     
+      ,@c-exprs ;;Execute the expressions
+      (mov (offset rsp ,(- (+ 3 (length env)))) rdi) ;;The body of the loop may have updated rdi
+      
+      ;;Increment the bignum in rbx and compare it with the bignum in rax to determine when to stop
+      (mov rdi (offset rsp ,(- (add1 (length env))))) ;;The argument is the bignum to be incremented
+      (xor rdi ,type-bignum)
+      (sub rsp ,stack-size)
+      (call increment)
+      (add rsp ,stack-size) ;;Restore the stack
+      
+      
+      (mov rdi (offset rsp ,(- (add1 (length env))))) ;;make the incremented value the first argument to the comparison of the current value and the end of the range
+      (xor rdi ,type-bignum)
+      (mov rsi (offset rsp ,(- (+ 2 (length env))))) ;;pass the end of the range
+      (xor rsi ,type-bignum)
+      (sub rsp ,stack-size)
+      (call compBignum)
+      (add rsp ,stack-size)
+      
+      (mov rdi (offset rsp ,(- (+ 3 (length env)))));;Restore rdi
+      (mov rsi (offset rsp ,(- (+ 4 (length env)))));;Restore rsi
+      
+      (cmp rax 0) ;;If the return value of compBignum is <= 0, then loop
+      (jle ,loop)
+
+      (mov rax ,type-true)
+      ,end)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile Display;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;Compile a display expression
+;;Display CEnv -> ASM
+(define (compile-display expr env)
+  (match expr
+    [`(println ,e1) (compile-println e1 env)]))
+
+;;Compile a println expression
+;;Expr CEnv -> ASM
+(define (compile-println e1 env)
+  (let ((c1 (compile-e e1 env))
+        (stack-size (* 8 (+ 1 (length env)))))
+    `(,@c1
+
+      ;;;;;;;;;;;;;;;::Call printResult to display the result of evaluating e1;;;;;;;;;;;;;;;;;;;;;;;;
+
+      ;;Save the value in rdi before using it to pass argument to printResult
+      (mov (offset rsp ,(- (add1 (length env)))) rdi)
+
+      ;;Pass argument in rdi
+      (mov rdi rax)
+
+      ;;Setup the stack
+      (sub rsp ,stack-size)
+
+      (call printResult)
+
+      ;;Restore the stack
+      (add rsp ,stack-size)
+
+      ;;Restore rdi
+      (mov rdi (offset rsp ,(- (add1 (length env)))))
+
+      ;;Return #t
+      (mov rax ,type-true))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile LetBinding;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Compile a let binding
 ;;LetBinding CEnv -> ASM
 (define (compile-let-binding expr env)
@@ -485,15 +609,31 @@ type Variable =
 
 
       ;;Create the range on the heap and return a pointer to it. Each gmp struct is 16 bits so rdi still remains a multiple of 8
+      ;;Place the beginning of the range on the heap
       (mov rax (offset rsp ,(- (add1 (length env)))))
       (or rax ,type-bignum)
       (mov (offset rdi 0) rax)
+
+      ;;;;;;;;;;;;;;;;;Decrement the end of the range before placing it on the heap;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       (mov rax (offset rsp ,(- (+ 2 (length env)))))
-      (or rax ,type-bignum)
+
+      ;;Prep for/call decrement
+      (mov (offset rsp ,(- (+ 3 (length env)))) rdi) 
+      (mov rdi rax)
+      (sub rsp ,(* 8 (+ 3 (length env))))
+      (call decrement)
+
+      (add rsp ,(* 8 (+ 3 (length env)))) ;;Restore the stack
+      (mov rdi (offset rsp ,(- (+ 3 (length env))))) ;;Restore rdi
+      
+      (mov rax (offset rsp ,(- (+ 2 (length env))))) ;;Get the pointer to the decremented bignum
+      (or rax ,type-bignum) ;;Tag the bignum
+      
       (mov (offset rdi 1) rax)
 
+
       (mov rax rdi)
-      (or rax ,type-range-exclusive)
+      (or rax ,type-range)
       (add rdi 32)))) ;;Make rdi point to the next free position on the heap
       
 
@@ -544,7 +684,7 @@ type Variable =
       (mov (offset rdi 1) rax)
 
       (mov rax rdi)
-      (or rax ,type-range-inclusive)
+      (or rax ,type-range)
       (add rdi 32)))) ;;Make rdi point to the next free position on the heap
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile Boolean;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1088,6 +1228,14 @@ type Variable =
     (cmp rbx ,type-pair)
     (jne err)))
 
+;;A variable that holds ASM for confirming that the value in rax is a range
+(define assert-range
+  `((mov rbx rax)
+    (and rbx ,type-mask)
+    (cmp rbx ,type-range)
+    (jne err)))
+    
+
 ;;A variable that holds ASM for confirming that the value in rax is a pair or a list
 (define (assert-pair-list)
   (let ((end (gensym "end")))
@@ -1221,6 +1369,20 @@ type Variable =
 (define (logic? expr)
   (match expr
     [(or `(> ,e1 ,e2)`(< ,e1 ,e2) `(>= ,e1 ,e2) `(<= ,e1 ,e2) `(= ,e1 ,e2)) #t]
+    [_ #f]))
+
+;;Determine if the expression is a display expression
+;;Expr -> boolean
+(define (display? expr)
+  (match expr
+    [`(println ,expr) #t]
+    [_ #f]))
+
+;;Determine if the expression is a loop expression
+;;Expr -> boolean
+(define (loop? expr)
+  (match expr
+    [`(for ,v in ,expr do ,exprs ..1) #t]
     [_ #f]))
     
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Tests;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1454,17 +1616,17 @@ type Variable =
   (check-equal? (execute (compile `(let ((x 1) (y 1) (z 2)) (= x z)))) #f)
 
   ;;Test Range ..
-  (check-equal? (execute (compile `(.. 5 6))) `(5..6))
-  (check-equal? (execute (compile `(.. (add 1 0) (add 1 2)))) `(1..3))
-  (check-equal? (execute (compile `(.. (add 1 (sub 5 6)) 8))) `(0..8))
+  (check-equal? (execute (compile `(.. 5 6))) `(5..=5))
+  (check-equal? (execute (compile `(.. (add 1 0) (add 1 2)))) `(1..=2))
+  (check-equal? (execute (compile `(.. (add 1 (sub 5 6)) 8))) `(0..=7))
   (check-equal? (execute (compile `(.. '(1 2 3) 5))) 'err)
   (check-equal? (execute (compile `(.. 5 '(1 2 3)))) 'err)
   (check-equal? (execute (compile `(.. '(1 2 3) '()))) 'err)
   (check-equal? (execute (compile `(.. 5 4))) 'err)
   (check-equal? (execute (compile `(.. 5 5))) 'err)
   (check-equal? (execute (compile `(.. (add 1 (add 2 3)) (add 1 (add 2 2))))) 'err)
-  (check-equal? (execute (compile `(.. (if #t 100 #f) (let ((x 7)) (add x 100))))) '(100..107))
-  (check-equal? (execute (compile `(.. (head '(1 2 3)) 5))) '(1..5))
+  (check-equal? (execute (compile `(.. (if #t 100 #f) (let ((x 7)) (add x 100))))) '(100..=106))
+  (check-equal? (execute (compile `(.. (head '(1 2 3)) 5))) '(1..=4))
 
   ;;Test Range ..=
   (check-equal? (execute (compile `(..= 5 6))) `(5..=6))
@@ -1477,6 +1639,12 @@ type Variable =
   (check-equal? (execute (compile `(..= 5 5))) '(5..=5))
   (check-equal? (execute (compile `(..= (add 1 (add 2 3)) (add 1 (add 2 2))))) 'err)
   (check-equal? (execute (compile `(..= (if #t 100 #f) (let ((x 7)) (add x 100))))) '(100..=107))
-  (check-equal? (execute (compile `(..= (head '(1 2 3)) 5))) '(1..=5)))
+  (check-equal? (execute (compile `(..= (head '(1 2 3)) 5))) '(1..=5))
+
+  ;;Test println
+  (check-equal? (execute (compile `(println 5))) 5)
+  (check-equal? (execute (compile `(println (add 1 3)))) 4)
+  (check-equal? (execute (compile `(println (if #t '(1 2 3) (cons 1 2))))) ''(1 2 3)))
   
+
 

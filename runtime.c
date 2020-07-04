@@ -7,13 +7,13 @@
 
 #define result_mask 0b111
 #define result_shift 3
-#define type_range_exclusive 0b000
+
 #define type_bignum 0b001
 #define type_true 0b010
 #define type_false 0b011
 #define type_list  0b100
 #define type_pair 0b101
-#define type_range_inclusive 0b110
+#define type_range 0b110
 #define type_empty_list 0b111
 
 #define heap_size 10000000
@@ -23,6 +23,7 @@
 
 typedef char bool;
 int64_t entry(void* heap);
+void printResult(int64_t value);
 void printBignum(int64_t value);
 void printValue(int64_t value);
 void printList(int64_t value);
@@ -47,10 +48,8 @@ int main(int argc, char** argv) {
 	/* Entry may either return a 64 bit value via a register or a pointer to a result */
 	int64_t  value = entry(heap);
 	
-	/* Print the result */
-	printValue(value);
-	printf("\n");
-
+	printResult(value);
+	
 	free(heap);
 	return 0;
 }
@@ -67,6 +66,13 @@ void my_mpz_add(int64_t rop, int64_t op1, int64_t op2) {
 	mpz_add(*((mpz_t *)rop), *((mpz_t*)op1), *((mpz_t*)op2));
 }
 
+/* Increment the untagged pointer to a bignum */
+void increment(int64_t arg) {
+	mpz_add_ui(*((mpz_t*)arg), *((mpz_t*)arg), 1);
+	//printBignum(arg);
+	//printf("Bye from increment\n");
+}
+
 void my_mpz_sub(int64_t rop, int64_t op1, int64_t op2) {
 	assert(rop % 8 == 0);
 	assert(op1 % 8 == 0);
@@ -75,7 +81,10 @@ void my_mpz_sub(int64_t rop, int64_t op1, int64_t op2) {
 	mpz_sub(*((mpz_t *)rop), *((mpz_t*)op1), *((mpz_t*)op2));
 }
 
-
+/* Decrement the untagged pointer to a bignum */
+void decrement(int64_t arg) {
+	mpz_sub_ui(*((mpz_t*)arg), *((mpz_t*)arg), 1);
+}
 /** Compile a bignum into a GMP structure pointer.
     bn_str_ptr is a pointer to the string representation of the bignum.
     bn_struct_ptr is a pointer to the location on the heap where the
@@ -83,7 +92,7 @@ void my_mpz_sub(int64_t rop, int64_t op1, int64_t op2) {
     Return the size of the GMP struct representing the big num
 */
 
-int64_t compileBignum(int64_t bn_str_ptr, int64_t bn_struct_ptr) {
+int64_t compileBignum(int64_t bn_str_ptr, int64_t bn_struct_ptr) {	
 	int flag = 0;
 
 	//Setup the GMP structure
@@ -152,6 +161,14 @@ int64_t pairEqual(int64_t arg0, int64_t arg1) {
 		return pairEqual(*(a0 + 1), *(a1 + 1));
 	}
 }
+
+/* print the result of evaluating an expression */
+void printResult(int64_t value) {
+	/* Print the result */
+	printValue(value);
+	printf("\n");
+}
+
 /* Print a value. If printEmpty is true, print the empty list symbol, otherwise do not */
 void printValue(int64_t value) {
 	int64_t* addr;
@@ -179,23 +196,14 @@ void printValue(int64_t value) {
 	case type_false:
 		printf("#f");
 		break;
-	case type_range_inclusive:
+	case type_range:
 		printf("(");
-		addr = (int64_t *) (value ^ type_range_inclusive);
+		addr = (int64_t *) (value ^ type_range);
 		printBignum(*addr);
 		printf("..=");
 		printBignum(*(addr + 1));
 		printf(")");
 		break;
-	case type_range_exclusive:
-		printf("(");
-		addr = (int64_t *) (value ^ type_range_exclusive);
-		printBignum(*addr);
-		printf("..");
-		printBignum(*(addr + 1));
-		printf(")");
-		break;
- 	
 	}
 
 }
