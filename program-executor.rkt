@@ -27,8 +27,14 @@
             (error "Could not make a runnable program"))
         (error "Could not clean the directory")))) |#
 
-;;This version of execute does not use make. It sheds most of the weight of the above
-;;version by calling the relevant methods directly.
+;;Read multiple lines of datums into one list
+(define (read-multi-line)
+  (let ((v (read)))
+    (match v
+      [(? eof-object?) '()]
+      [_ (cons v (read-multi-line))])))
+
+;;Executes the program
 ;;ASM -> value
 (define (execute prog)
   (let* ((f.s (make-temporary-file "nasm~a.s"))
@@ -42,9 +48,13 @@
     (delete-file f.s) ;;Delete the assembly file
     ;;Execute the runnable program, saving its output as a string and using
     ;;read to read in the output as input
-    (with-input-from-string
-        (with-output-to-string
-          (λ ()
-            (system (path->string f.run))
-            (delete-file f.run)))
-      read)))
+    (let ((res (with-output-to-string
+                 (λ ()
+                   (system (path->string f.run))
+                   (delete-file f.run)))))
+      (with-input-from-string
+          res
+         (λ ()
+           (let ((v (read-multi-line)))
+             (if (= (length v) 1) (car v) v))))))) ;;Only return a list if there are multiple lines of output
+  

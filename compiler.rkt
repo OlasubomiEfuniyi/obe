@@ -1642,9 +1642,18 @@ type Variable =
   (check-equal? (execute (compile `(..= (head '(1 2 3)) 5))) '(1..=5))
 
   ;;Test println
-  (check-equal? (execute (compile `(println 5))) 5)
-  (check-equal? (execute (compile `(println (add 1 3)))) 4)
-  (check-equal? (execute (compile `(println (if #t '(1 2 3) (cons 1 2))))) ''(1 2 3)))
+  (check-equal? (execute (compile `(println 5))) '(5 #t))
+  (check-equal? (execute (compile `(println (add 1 3)))) '(4 #t))
+  (check-equal? (execute (compile `(println (if #t '(1 2 3) (cons 1 2))))) '('(1 2 3) #t))
+
+  ;;Test for loop
+  (check-equal? (execute (compile `(for value in (..= 1 5) do (let ((x (add 2 value))) (println x))))) '(3 4 5 6 7 #t))
+  (check-equal? (execute (compile `(for x in (if #t (..= 1 5) (.. 1 4)) do (let ((y x)) y)))) #t)
+  (check-equal? (execute (compile `(for x in (..= 1 3) do
+                                  (println x)
+                                  (for x in (..= x 3) do (println x))))) '(1 1 2 3 2 2 3 3 3 #t))
+  (check-equal? (execute (compile `(for x in (.. 1 1) do 5))) 'err)
+  (check-equal? (execute (compile `(for x in (.. 1 2) do 5 (add 1 #t)))) 'err))
   
 
 
