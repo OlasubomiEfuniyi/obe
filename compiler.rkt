@@ -295,11 +295,24 @@ type Variable =
       (mov (offset rsp ,(- (+ 3 (length env)))) rdi) ;;The body of the loop may have updated rdi
       
       ;;Increment the bignum in rbx and compare it with the bignum in rax to determine when to stop
-      (mov rdi (offset rsp ,(- (add1 (length env))))) ;;The argument is the bignum to be incremented
+      (mov rdi (offset rsp ,(- (add1 (length env))))) ;;The first argument is the bignum to be incremented
+      ;;The second argument is an untagged pointer to a position on the heap where the resulting
+      ;;GMP struct should ge placed
+      (mov rsi (offset rsp ,(- (+ 3 (length env)))))
+      ;;Update the new begining of the range on the stack.
+      ;;Keep the invariant that the value is tagged
+      (or rsi ,type-bignum)
+      (mov (offset rsp ,(- (add1 (length env)))) rsi)
+      (xor rsi ,type-bignum)
+      
       (xor rdi ,type-bignum)
       (sub rsp ,stack-size)
       (call increment)
       (add rsp ,stack-size) ;;Restore the stack
+      ;;Update the value of rdi as saved on the stack
+      (mov rdi (offset rsp ,(- (+ 3 (length env)))))
+      (add rdi 16)
+      (mov (offset rsp ,(- (+ 3 (length env)))) rdi)
       
       
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;make the incremented value the first argument to the comparison of the current value and the end of the range
@@ -613,20 +626,25 @@ type Variable =
       (mov rax (offset rsp ,(- (add1 (length env)))))
       (or rax ,type-bignum)
       (mov (offset rdi 0) rax)
-
+      
       ;;;;;;;;;;;;;;;;;Decrement the end of the range before placing it on the heap;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       (mov rax (offset rsp ,(- (+ 2 (length env)))))
 
       ;;Prep for/call decrement
-      (mov (offset rsp ,(- (+ 3 (length env)))) rdi) 
+      (mov (offset rsp ,(- (+ 3 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 4 (length env)))) rsi)
       (mov rdi rax)
-      (sub rsp ,(* 8 (+ 3 (length env))))
+      (mov rsi (offset rsp ,(- (+ 3 (length env)))))
+      (add rsi 16) ;;Skip over the beginning of the range on the heap
+      (sub rsp ,stack-size)
       (call decrement)
 
-      (add rsp ,(* 8 (+ 3 (length env)))) ;;Restore the stack
+      (add rsp ,stack-size) ;;Restore the stack
       (mov rdi (offset rsp ,(- (+ 3 (length env))))) ;;Restore rdi
+      (mov rsi (offset rsp ,(- (+ 4 (length env))))) ;;Restore rsi
       
-      (mov rax (offset rsp ,(- (+ 2 (length env))))) ;;Get the pointer to the decremented bignum
+      (mov rax (offset rsp ,(- (+ 3 (length env))))) ;;Get the pointer to the decremented bignum
+      (add rax 16)
       (or rax ,type-bignum) ;;Tag the bignum
       
       (mov (offset rdi 1) rax)
@@ -1649,6 +1667,9 @@ type Variable =
   ;;Test for loop
   (check-equal? (execute (compile `(for value in (..= 1 5) do (let ((x (add 2 value))) (println x))))) '(3 4 5 6 7 #t))
   (check-equal? (execute (compile `(for x in (if #t (..= 1 5) (.. 1 4)) do (let ((y x)) y)))) #t)
+    (check-equal? (execute (compile `(for x in (..= 1 3) do
+                                  (println x)
+                                  (for x in (..= 1 3) do (println x))))) '(1 1 2 3 2 1 2 3 3 1 2 3 #t))
   (check-equal? (execute (compile `(for x in (..= 1 3) do
                                   (println x)
                                   (for x in (..= x 3) do (println x))))) '(1 1 2 3 2 2 3 3 3 #t))
