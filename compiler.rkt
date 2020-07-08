@@ -65,8 +65,10 @@ type Value =
 |Range
 
 type Range =
-|`(.. Expr Expr) starting from first integer, not including the last integer. Both expressions must evaluate to an integer
-|`(..= Expr Expr) starting from first integer, including the last integer. Both expressions must evaluate to an integer
+|`(.. Expr Expr) starting from first integer, not including the last integer, stepping by 1. Both expressions must evaluate to an integer
+|`(..= Expr Expr) starting from first integer, including the last integer, stepping 1. Both expressions must evaluate to an integer
+|`(.. Expr Expr Expr) starting from first integer, not including the last integer, stepping by the third integer. All three expressions must evaluate to integers
+|`(..= Expr Expr Expr) starting from first integer, including the last integer, stepping by the third integer. All three expressions must evaluate to integers
 
 type List =
 |``(Expr*)
@@ -126,8 +128,10 @@ type Variable =
     [''() ''()]
     [`(quote ,lst) (list-literal-to-cons `,lst)]
     [`(cons ,e1 ,e2) `(cons ,(desugar e1) ,(desugar e2))]
-    [`(.. ,e1 ,e2) `(.. ,(desugar e1) ,(desugar e2))]
-    [`(..= ,e1 ,e2) `(..= ,(desugar e1) ,(desugar e2))]))
+    [`(.. ,e1 ,e2) `(.. ,(desugar e1) ,(desugar e2) 1)]
+    [`(..= ,e1 ,e2) `(..= ,(desugar e1) ,(desugar e2) 1)]
+    [`(.. ,e1 ,e2 ,e3) `(.. ,(desugar e1) ,(desugar e2) ,(desugar e3))]
+    [`(..= ,e1 ,e2 ,e3) `(..= ,(desugar e1) ,(desugar e2) ,(desugar e3))]))
 
 ;;Desugar an arithmetic operation
 ;;Arithmetic -> Arithmetic
@@ -237,8 +241,8 @@ type Variable =
     [(? boolean? expr) (compile-boolean expr)]
     [''() `((mov rax ,type-empty-list))]
     [`(cons ,e1 ,e2) (compile-pair e1 e2 env)]
-    [`(.. ,e1 ,e2) (compile-range-not-inclusive e1 e2 env)]
-    [`(..= ,e1 ,e2) (compile-range-inclusive e1 e2 env)]))
+    [`(.. ,e1 ,e2 ,e3) (compile-range-not-inclusive e1 e2 e3 env)]
+    [`(..= ,e1 ,e2 ,e3) (compile-range-inclusive e1 e2 e3 env)]))
 
 ;;Compile an arithmetic expression into ASM
 ;;Number CEnv -> ASM
@@ -585,10 +589,11 @@ type Variable =
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile Range;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Compile a range expression, starting from the first integer and not including the last integer
 ;;Expr Expr CEnv -> ASM
-(define (compile-range-not-inclusive e1 e2 env)
+(define (compile-range-not-inclusive e1 e2 e3 env)
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
-        (stack-size (* 8 (+ 4 (length env)))))
+        (c3 (compile-e e3 (extend #f (extend #f env))))
+        (stack-size (* 8 (+ 5 (length env)))))
     `(,@c1
       ,@assert-bignum
       (xor rax ,type-bignum) ;;Untag the pointer to the bignum
@@ -598,12 +603,17 @@ type Variable =
       ,@assert-bignum
       (xor rax ,type-bignum) ;;Untag the pointer to the bignum
       (mov (offset rsp ,(- (+ 2 (length env)))) rax) ;;save the ending point of the range on the stack
+
+      ,@c3
+      ,@assert-bignum
+      (xor rax ,type-bignum) ;;Untag the pointer to the bignum
+      (mov (offset rsp ,(- (+ 3 (length env)))) rax) ;;save the step value on the stack
       
       ;;;;;;;;;;;;;Make sure the starting point is strictly less than the ending point usig compBignum;;;;;;;;;;;;;;;
 
       ;;Prep for call to compBignum
-      (mov (offset rsp ,(- (+ 3 (length env)))) rdi)
-      (mov (offset rsp ,(- (+ 4 (length env)))) rsi)
+      (mov (offset rsp ,(- (+ 4 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 5 (length env)))) rsi)
 
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;pass the starting point of the range in rdi
       (mov rsi (offset rsp ,(- (+ 2 (length env))))) ;;pass the ending point of the range in rdi
@@ -613,8 +623,8 @@ type Variable =
       (add rsp ,stack-size)
 
       ;;Restore the registers used to pass arguments to compBignum
-      (mov rdi (offset rsp ,(- (+ 3 (length env)))))
-      (mov rsi (offset rsp ,(- (+ 4 (length env)))))
+      (mov rdi (offset rsp ,(- (+ 4 (length env)))))
+      (mov rsi (offset rsp ,(- (+ 5 (length env)))))
 
       ;;Use the result of compBignum to check that the starting point is strictly less than the ending point
       (cmp rax 0)
@@ -631,36 +641,41 @@ type Variable =
       (mov rax (offset rsp ,(- (+ 2 (length env)))))
 
       ;;Prep for/call decrement
-      (mov (offset rsp ,(- (+ 3 (length env)))) rdi)
-      (mov (offset rsp ,(- (+ 4 (length env)))) rsi)
+      (mov (offset rsp ,(- (+ 4 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 5 (length env)))) rsi)
       (mov rdi rax)
-      (mov rsi (offset rsp ,(- (+ 3 (length env)))))
-      (add rsi 16) ;;Skip over the beginning of the range on the heap
+      (mov rsi (offset rsp ,(- (+ 4 (length env)))))
+      (add rsi 8) ;;Skip over the beginning of the range on the heap
       (sub rsp ,stack-size)
       (call decrement)
 
       (add rsp ,stack-size) ;;Restore the stack
-      (mov rdi (offset rsp ,(- (+ 3 (length env))))) ;;Restore rdi
-      (mov rsi (offset rsp ,(- (+ 4 (length env))))) ;;Restore rsi
+      (mov rdi (offset rsp ,(- (+ 4 (length env))))) ;;Restore rdi
+      (mov rsi (offset rsp ,(- (+ 5 (length env))))) ;;Restore rsi
       
-      (mov rax (offset rsp ,(- (+ 3 (length env))))) ;;Get the pointer to the decremented bignum
-      (add rax 16)
+      (mov rax (offset rsp ,(- (+ 4 (length env))))) ;;Get the pointer to the decremented bignum
+      (add rax 8)
       (or rax ,type-bignum) ;;Tag the bignum
       
       (mov (offset rdi 1) rax)
 
+      ;;Place the step value after the start and end value on the heap
+      (mov rax (offset rsp ,(- (+ 3 (length env)))))
+      (or rax ,type-bignum)
+      (mov (offset rdi 2) rax)
 
       (mov rax rdi)
       (or rax ,type-range)
-      (add rdi 32)))) ;;Make rdi point to the next free position on the heap
+      (add rdi 24)))) ;;Make rdi point to the next free position on the heap
       
 
 ;;Compile a range expression, starting from the first integer and including the last integer
 ;;Expr Expr CEnv -> ASM
-(define (compile-range-inclusive e1 e2 env)
+(define (compile-range-inclusive e1 e2 e3 env)
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
-        (stack-size (* 8 (+ 4 (length env)))))
+        (c3 (compile-e e3 (extend #f (extend #f env))))
+        (stack-size (* 8 (+ 5 (length env)))))
     `(,@c1
       ,@assert-bignum
       (xor rax ,type-bignum) ;;Untag the pointer to the bignum
@@ -670,12 +685,17 @@ type Variable =
       ,@assert-bignum
       (xor rax ,type-bignum) ;;Untag the pointer to the bignum
       (mov (offset rsp ,(- (+ 2 (length env)))) rax) ;;save the ending point of the range on the stack
+
+      ,@c3
+      ,@assert-bignum
+      (xor rax ,type-bignum) ;;Untag the pointer to the bignum
+      (mov (offset rsp ,(- (+ 3 (length env)))) rax) ;;save the step value of the range on the stack
       
       ;;;;;;;;;;;;;Make sure the starting point is less than or equal to the ending point usig compBignum;;;;;;;;;;;;;;;
 
       ;;Prep for call to compBignum
-      (mov (offset rsp ,(- (+ 3 (length env)))) rdi)
-      (mov (offset rsp ,(- (+ 4 (length env)))) rsi)
+      (mov (offset rsp ,(- (+ 4 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 5 (length env)))) rsi)
 
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;pass the starting point of the range in rdi
       (mov rsi (offset rsp ,(- (+ 2 (length env))))) ;;pass the ending point of the range in rdi
@@ -685,25 +705,28 @@ type Variable =
       (add rsp ,stack-size)
 
       ;;Restore the registers used to pass arguments to compBignum
-      (mov rdi (offset rsp ,(- (+ 3 (length env)))))
-      (mov rsi (offset rsp ,(- (+ 4 (length env)))))
+      (mov rdi (offset rsp ,(- (+ 4 (length env)))))
+      (mov rsi (offset rsp ,(- (+ 5 (length env)))))
 
       ;;Use the result of compBignum to check that the starting point is less than or equal to the ending point
       (cmp rax 0)
       (jg err) ;;If the return value is greater than or equal to 0, starting point is greater than or equal to ending point
 
 
-      ;;Create the range on the heap and return a pointer to it. Each gmp struct is 16 bits so rdi still remains a multiple of 8
+      ;;Create the range on the heap and return a pointer to it. Each pointer to a gmp struct is 8 bytes, keepind rdi a multiple of 8
       (mov rax (offset rsp ,(- (add1 (length env)))))
       (or rax ,type-bignum)
       (mov (offset rdi 0) rax)
       (mov rax (offset rsp ,(- (+ 2 (length env)))))
       (or rax ,type-bignum)
       (mov (offset rdi 1) rax)
+      (mov rax (offset rsp ,(- (+ 3 (length env)))))
+      (or rax ,type-bignum)
+      (mov (offset rdi 2) rax)
 
       (mov rax rdi)
       (or rax ,type-range)
-      (add rdi 32)))) ;;Make rdi point to the next free position on the heap
+      (add rdi 24)))) ;;Make rdi point to the next free position on the heap
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile Boolean;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Compile a boolean into assembly, placing the value in rax
@@ -1364,6 +1387,8 @@ type Variable =
         [`(cons ,e1 ,e2) #t]
         [`(.. ,e1 ,e2) #t]
         [`(..= ,e1 ,e2) #t]
+        [`(.. ,e1 ,e2 ,e3) #t]
+        [`(..= ,e1 ,e2 ,e3) #t]
         [_ #f])))
 
 ;;Determine if the expression is a list-op
