@@ -629,13 +629,6 @@ type Variable =
       ;;Use the result of compBignum to check that the starting point is strictly less than the ending point
       (cmp rax 0)
       (jge err) ;;If the return value is greater than or equal to 0, starting point is greater than or equal to ending point
-
-
-      ;;Create the range on the heap and return a pointer to it. Each gmp struct is 16 bits so rdi still remains a multiple of 8
-      ;;Place the beginning of the range on the heap
-      (mov rax (offset rsp ,(- (add1 (length env)))))
-      (or rax ,type-bignum)
-      (mov (offset rdi 0) rax)
       
       ;;;;;;;;;;;;;;;;;Decrement the end of the range before placing it on the heap;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       (mov rax (offset rsp ,(- (+ 2 (length env)))))
@@ -645,18 +638,23 @@ type Variable =
       (mov (offset rsp ,(- (+ 5 (length env)))) rsi)
       (mov rdi rax)
       (mov rsi (offset rsp ,(- (+ 4 (length env)))))
-      (add rsi 8) ;;Skip over the beginning of the range on the heap
       (sub rsp ,stack-size)
       (call decrement)
 
       (add rsp ,stack-size) ;;Restore the stack
       (mov rdi (offset rsp ,(- (+ 4 (length env))))) ;;Restore rdi
       (mov rsi (offset rsp ,(- (+ 5 (length env))))) ;;Restore rsi
+
+      (add rdi 16) ;;Skip over the gmp struct for the decremented value on the heap
+
+      ;;Create the range on the heap and return a pointer to it. Each gmp struct is 16 bits so rdi still remains a multiple of 8
+      ;;Place the beginning of the range on the heap
+      (mov rax (offset rsp ,(- (add1 (length env)))))
+      (or rax ,type-bignum)
+      (mov (offset rdi 0) rax)
       
       (mov rax (offset rsp ,(- (+ 4 (length env))))) ;;Get the pointer to the decremented bignum
-      (add rax 8)
       (or rax ,type-bignum) ;;Tag the bignum
-      
       (mov (offset rdi 1) rax)
 
       ;;Place the step value after the start and end value on the heap
