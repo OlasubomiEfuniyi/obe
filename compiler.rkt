@@ -7,7 +7,7 @@
 
 (define shift 3)
 (define type-mask #b111)
-
+(define type-box #b000)
 (define type-bignum #b001)
 (define type-true #b010)
 (define type-false #b011)
@@ -33,6 +33,7 @@ type Expr =
 |Variable
 |ListOp
 |PairOp
+|BoxOp
 
 type Display =
 |`(println Expr)
@@ -63,6 +64,11 @@ type Value =
 |'()
 |List
 |Range
+|(box Expr)
+
+type BoxOp =
+|`(unbox ,Expr) Where Expr evaluates to a value of type box
+|`(set ,Expr ,Expr) Where the first Expr evaluates to a value of type box and the second Expr evaluates to some value to be placed in the box
 
 type Range =
 |`(.. Expr Expr) starting from first integer, not including the last integer, stepping by 1. Both expressions must evaluate to an integer
@@ -114,6 +120,7 @@ type Variable =
     [(? decision? expr) (desugar-decision expr)]
     [(? list-op? expr) (desugar-list-op expr)]
     [(? pair-op? expr) (desugar-pair-op expr)]
+    [(? box-op? expr) (desugar-box-op expr)]
     [(? logic? expr) (desugar-logic expr)]
     [(? display? expr) (desugar-display expr)]
     [(? loop? expr) (desugar-loop expr)]
@@ -131,7 +138,8 @@ type Variable =
     [`(.. ,e1 ,e2) `(.. ,(desugar e1) ,(desugar e2) 1)]
     [`(..= ,e1 ,e2) `(..= ,(desugar e1) ,(desugar e2) 1)]
     [`(.. ,e1 ,e2 ,e3) `(.. ,(desugar e1) ,(desugar e2) ,(desugar e3))]
-    [`(..= ,e1 ,e2 ,e3) `(..= ,(desugar e1) ,(desugar e2) ,(desugar e3))]))
+    [`(..= ,e1 ,e2 ,e3) `(..= ,(desugar e1) ,(desugar e2) ,(desugar e3))]
+    [`(box ,e1) `(box ,(desugar e1))]))
 
 ;;Desugar an arithmetic operation
 ;;Arithmetic -> Arithmetic
@@ -161,6 +169,13 @@ type Variable =
   (match expr
     [`(head ,lst) `(head ,(desugar lst))]
     [`(tail ,lst) `(tail ,(desugar lst))]))
+
+;;Desugar a box operation
+;;BoxOp -> BoxOp
+(define (desugar-box-op expr)
+  (match expr
+    [`(unbox ,v) `(unbox ,(desugar v))]
+    [`(set ,e1 ,e2) `(set ,(desugar e1) ,(desugar e2))]))
 
 ;;Desugar a decision
 ;;Decision -> Decision
@@ -227,6 +242,7 @@ type Variable =
     [(? decision? expr) (compile-decision expr env)]
     [(? list-op? expr) (compile-list-op expr env)]
     [(? pair-op? expr) (compile-pair-op expr env)]
+    [(? box-op? expr) (compile-box-op expr env)]
     [(? logic? expr) (compile-logic expr env)]
     [(? display? expr) (compile-display expr env)]
     [(? loop? expr) (compile-loop expr env)]
@@ -242,7 +258,8 @@ type Variable =
     [''() `((mov rax ,type-empty-list))]
     [`(cons ,e1 ,e2) (compile-pair e1 e2 env)]
     [`(.. ,e1 ,e2 ,e3) (compile-range-not-inclusive e1 e2 e3 env)]
-    [`(..= ,e1 ,e2 ,e3) (compile-range-inclusive e1 e2 e3 env)]))
+    [`(..= ,e1 ,e2 ,e3) (compile-range-inclusive e1 e2 e3 env)]
+    [`(box ,e1) (compile-box e1 env)]))
 
 ;;Compile an arithmetic expression into ASM
 ;;Number CEnv -> ASM
@@ -258,6 +275,49 @@ type Variable =
     ;;Every integer is treated as a bignum
     [(? integer? num) (compile-bignum num env)]))
 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile Box;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(define (compile-box e1 env)
+  `(
+    ,@(compile-e e1 env)
+    (mov (offset rdi 0) rax) ;;Place the value on the heap
+    (mov rax rdi) ;;Get the pointer to the boxed value
+    (or rax ,type-box) ;;Tag the value as type box
+    (add rdi 8)))
+
+;;Compile a box operation
+;;BoxOp CEnv -> ASM
+(define (compile-box-op e1 env)
+  (match e1
+    [`(unbox ,e1) (compile-unbox e1 env)]
+    [`(set ,e1 ,e2) (compile-set e1 e2 env)]))
+
+;;Compile the unbox operation
+;;Expr CEnv -> ASM
+(define (compile-unbox e1 env)
+  `(
+    ,@(compile-e e1 env)
+    ,@assert-box
+    (xor rax ,type-box)
+    (mov rax (offset rax 0))))
+
+(define (compile-set e1 e2 env)
+  `(
+    ;;Compile the box
+    ,@(compile-e e1 env)
+    ,@assert-box
+    (mov (offset rsp ,(- (add1 (length env)))) rax)
+
+    ;;Compile the value
+    ,@(compile-e e2 (extend #f env))
+    (mov rbx rax)
+    
+    ;;Untag the pointer to the box and replace the value in the box
+    (mov rax (offset rsp ,(- (add1 (length env)))))
+    (xor rax ,type-box)
+    (mov (offset rax 0) rbx)
+    ;;Tag the pointer to the box again before returning it
+    (or rax ,type-box)))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile Loop;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Compile a loop expression
 ;;Loop CEnv -> ASM
@@ -1260,6 +1320,13 @@ type Variable =
     (cmp rbx ,type-list)
     (jne err)))
 
+;;A variable that holds ASM for confirming that the value in rax is a box
+(define assert-box
+  `((mov rbx rax)
+    (and rbx ,type-mask)
+    (cmp rbx ,type-box)
+    (jne err)))
+
 ;;A variable that holds ASM for confirming that the value in rax is a pair
 (define assert-pair
   `((mov rbx rax)
@@ -1387,6 +1454,7 @@ type Variable =
         [`(..= ,e1 ,e2) #t]
         [`(.. ,e1 ,e2 ,e3) #t]
         [`(..= ,e1 ,e2 ,e3) #t]
+        [`(box ,e1) #t]
         [_ #f])))
 
 ;;Determine if the expression is a list-op
@@ -1403,6 +1471,14 @@ type Variable =
   (match expr
     [`(first ,pair) #t]
     [`(second ,pair) #t]
+    [_ #f]))
+
+;;Determine if the expression is a box-op
+;;Expr -> boolean
+(define (box-op? expr)
+  (match expr
+    [`(unbox ,e1) #t]
+    [`(set ,e1 ,e2) #t]
     [_ #f]))
 
 ;;Determine if the expression is a logical expression
@@ -1488,11 +1564,11 @@ type Variable =
 
   ;;Test let with pattern matching
   (check-equal? (execute (compile `(let ((x y (cons 1 2))) (add x y)))) 3)
-  (check-equal? (execute (compile `(let ((x y (cons 1 '()))) (cons 2 y)))) ''(2))
-  (check-equal? (execute (compile `(let ((lst '(1 2 3 4 5))) (let ((h t lst)) t)))) ''(2 3 4 5))
+  (check-equal? (execute (compile `(let ((x y (cons 1 '()))) (cons 2 y)))) '(2))
+  (check-equal? (execute (compile `(let ((lst '(1 2 3 4 5))) (let ((h t lst)) t)))) '(2 3 4 5))
   (check-equal? (execute (compile `(let ((h t (add 1 2))) h))) 'err)
-  (check-equal? (execute (compile `(let ((lst (cons 1 (cons 2 (cons 3 (cons 4 '())))))) (let ((h t (tail lst))) t)))) ''(3 4))
-  (check-equal? (execute (compile `(let ((lst (cons 1 (cons 2 (cons 3 (cons 4 '())))))) (let ((h t (second lst))) t)))) ''(3 4))
+  (check-equal? (execute (compile `(let ((lst (cons 1 (cons 2 (cons 3 (cons 4 '())))))) (let ((h t (tail lst))) t)))) '(3 4))
+  (check-equal? (execute (compile `(let ((lst (cons 1 (cons 2 (cons 3 (cons 4 '())))))) (let ((h t (second lst))) t)))) '(3 4))
   (check-equal? (execute (compile `(let ((var1 1234) (x y (cons 1 2))) (add var1 x)))) 1235)
   (check-equal? (execute (compile `(let ((x y (cons 1 2)) (var1 1234)) (add var1 x)))) 1235)
   (check-equal? (execute (compile `(let ((var1 1) (var2 #t) (var3 var4 (cons 1 (cons 2 (cons 3 4))))) (if var2 (add (add var1 var3) (first var4)) 0)))) 4)
@@ -1501,7 +1577,7 @@ type Variable =
                                      (if (head myList)
                                          (let ((h t myList))
                                            t)
-                                           #f)))) ''(2))
+                                           #f)))) '(2))
   
   ;;Test booleans
   (check-equal? (execute (compile `#t)) #t)
@@ -1521,32 +1597,32 @@ type Variable =
   (check-equal? (execute (compile `(let ((x (if 1 2 3)) (y (if (add 0 1) 5 6))) (if (sub x y) x y)))) 2)
 
   ;;Test list value
-  (check-equal? (execute (compile ''(1 2 3))) ''(1 2 3))
-  (check-equal? (execute (compile ''(#t #f #t #f))) ''(#t #f #t #f))
-  (check-equal? (execute (compile ''((add 2 3) (sub 1 2)))) ''(5 -1))
-  (check-equal? (execute (compile ''(12345678901234567890 (if #t 1 2)))) ''(12345678901234567890 1))
-  (check-equal? (execute (compile ''('(#t #f) 1 2 '(3 4)))) ''('(#t #f) 1 2 '(3 4)))
-  (check-equal? (execute (compile ''('('(1) '(2))))) ''('('(1) '(2))))
+  (check-equal? (execute (compile ''(1 2 3))) '(1 2 3))
+  (check-equal? (execute (compile ''(#t #f #t #f))) '(#t #f #t #f))
+  (check-equal? (execute (compile ''((add 2 3) (sub 1 2)))) '(5 -1))
+  (check-equal? (execute (compile ''(12345678901234567890 (if #t 1 2)))) '(12345678901234567890 1))
+  (check-equal? (execute (compile ''('(#t #f) 1 2 '(3 4)))) '((#t #f) 1 2 (3 4)))
+  (check-equal? (execute (compile ''('('(1) '(2))))) '(((1) (2))))
   
   ;;Test head
   (check-equal? (execute (compile '(head '(1 2 3)))) 1)
   (check-equal? (execute (compile '(head '()))) 'err)
   (check-equal? (execute (compile '(head (head '('(1 5) 2 3))))) 1)
-  (check-equal? (execute (compile '(head '('('(1) '(2)))))) ''('(1) '(2)))
+  (check-equal? (execute (compile '(head '('('(1) '(2)))))) '((1) (2)))
   (check-equal? (execute (compile '(head (if #t '( 1 (add 1 2)) #f)))) 1)
   
   ;;Test Tail
-  (check-equal? (execute (compile '(tail '(1 2 3)))) ''(2 3))
+  (check-equal? (execute (compile '(tail '(1 2 3)))) '(2 3))
   (check-equal? (execute (compile '(tail '()))) 'err)
-  (check-equal? (execute (compile '(tail (tail '('(1 5) 2 3))))) ''(3))
-  (check-equal? (execute (compile '(tail '('('(1) '(2)))))) ''())
-  (check-equal? (execute (compile '(tail (if #t '(1 (add 1 2)) #f)))) ''(3))
+  (check-equal? (execute (compile '(tail (tail '('(1 5) 2 3))))) '(3))
+  (check-equal? (execute (compile '(tail '('('(1) '(2)))))) '())
+  (check-equal? (execute (compile '(tail (if #t '(1 (add 1 2)) #f)))) '(3))
 
   ;;Test Pair
-  (check-equal? (execute (compile '(cons #t #f))) ''(#t . #f))
-  (check-equal? (execute (compile '(cons #t (cons #f #t)))) ''(#t #f . #t))
-  (check-equal? (execute (compile '(cons #t (cons #f '(1))))) ''(#t #f 1))
-  (check-equal? (execute (compile '(cons 1 (cons #t (cons 3 (cons #f '())))))) ''(1 #t 3 #f))
+  (check-equal? (execute (compile '(cons #t #f))) '(#t . #f))
+  (check-equal? (execute (compile '(cons #t (cons #f #t)))) '(#t #f . #t))
+  (check-equal? (execute (compile '(cons #t (cons #f '(1))))) '(#t #f 1))
+  (check-equal? (execute (compile '(cons 1 (cons #t (cons 3 (cons #f '())))))) '(1 #t 3 #f))
                 
 
 
@@ -1557,7 +1633,7 @@ type Variable =
   (let ((lst '(cons 2 (cons 1 '()))))
     (check-equal? (execute (compile `(first ,lst))) 2)
     (check-equal? (execute (compile `(first (second ,lst)))) 1)
-    (check-equal? (execute (compile `(second (second ,lst)))) ''())
+    (check-equal? (execute (compile `(second (second ,lst)))) '())
     (check-equal? (execute (compile `(second (second (second ,lst))))) 'err))
 
   (let ((pair '(cons (add 1 2) (cons (add 1 1) (sub 1 0)))))
@@ -1568,10 +1644,10 @@ type Variable =
  
   (let ((lp '(cons #t '(1 2 3))))
     (check-equal? (execute (compile `(first ,lp))) #t)
-    (check-equal? (execute (compile `(second ,lp))) ''(1 2 3))
+    (check-equal? (execute (compile `(second ,lp))) '(1 2 3))
     (check-equal? (execute (compile `(first (second ,lp)))) 1) 
     (check-equal? (execute (compile `(head (second ,lp)))) 1)
-    (check-equal? (execute (compile `(tail (second ,lp)))) ''(2 3)))
+    (check-equal? (execute (compile `(tail (second ,lp)))) '(2 3)))
 
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Test Logical operators;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;;Test >
@@ -1685,7 +1761,7 @@ type Variable =
   ;;Test println
   (check-equal? (execute (compile `(println 5))) '(5 #t))
   (check-equal? (execute (compile `(println (add 1 3)))) '(4 #t))
-  (check-equal? (execute (compile `(println (if #t '(1 2 3) (cons 1 2))))) '('(1 2 3) #t))
+  (check-equal? (execute (compile `(println (if #t '(1 2 3) (cons 1 2))))) '((1 2 3) #t))
 
   ;;Test for loop
   (check-equal? (execute (compile `(for value in (..= 1 5) do (let ((x (add 2 value))) (println x))))) '(3 4 5 6 7 #t))
@@ -1697,7 +1773,28 @@ type Variable =
                                   (println x)
                                   (for x in (..= x 3) do (println x))))) '(1 1 2 3 2 2 3 3 3 #t))
   (check-equal? (execute (compile `(for x in (.. 1 1) do 5))) 'err)
-  (check-equal? (execute (compile `(for x in (.. 1 2) do 5 (add 1 #t)))) 'err))
+  (check-equal? (execute (compile `(for x in (.. 1 2) do 5 (add 1 #t)))) 'err)
+
+  ;;Test box
+  (check-equal? (execute (compile `(box 5))) '#&5)
+  (check-equal? (execute (compile `(box (box 5)))) '#&#&5)
+  (check-equal? (execute (compile `(box (cons 1 2)))) '#&(1 . 2))
+  (check-equal? (execute (compile `(box (add 0 #t)))) 'err)
+  (check-equal? (execute (compile `(box (.. 1 3)))) '#&(1..=2))
+
+  ;; Test unbox
+  (check-equal? (execute (compile `(unbox (box 5)))) '5)
+  (check-equal? (execute (compile `(unbox (box (box 5))))) '#&5)
+  (check-equal? (execute (compile `(unbox (box (cons 1 2))))) '(1 . 2))
+  (check-equal? (execute (compile `(unbox (box (add 0 #t))))) 'err)
+  (check-equal? (execute (compile `(unbox (box (.. 1 3))))) '(1..=2))
+
+  ;; Test set
+  (check-equal? (execute (compile `(set (box 5) 6))) '#&6)
+  (check-equal? (execute (compile `(set (box 5) #t))) '#&#t)
+  (check-equal? (execute (compile `(set 6 (box 5)))) 'err)
+  (check-equal? (execute (compile `(set (set (box 5) 6) 7))) '#&7))
+
   
 
 

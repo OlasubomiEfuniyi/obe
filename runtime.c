@@ -7,7 +7,7 @@
 
 #define result_mask 0b111
 #define result_shift 3
-
+#define type_box 0b000
 #define type_bignum 0b001
 #define type_true 0b010
 #define type_false 0b011
@@ -178,17 +178,17 @@ void printValue(int64_t value) {
 		printBignum(value);	
 		break;
 	case type_list:
-		printf("'(");
+		printf("(");
 		printList(value);
 		printf(")");
 		break;
 	case type_pair:
-		printf("'(");
+		printf("(");
 		printPair(value);
 		printf(")");
 		break;
 	case type_empty_list:
-		printf("'()");
+		printf("()");
 		break;
 	case type_true:
 		printf("#t");
@@ -203,6 +203,10 @@ void printValue(int64_t value) {
 		printf("..=");
 		printBignum(*(addr + 1));
 		printf(")");
+		break;
+	case type_box:
+		printf("#&");
+		printValue(*((int64_t*)(value ^ type_box)));
 		break;
 	}
 
