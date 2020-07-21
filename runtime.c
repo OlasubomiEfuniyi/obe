@@ -16,13 +16,13 @@
 #define type_range 0b110
 #define type_empty_list 0b111
 
-#define heap_size 10000000
+#define heap_size 100000000
 
 #define true 1
 #define false 0
 
 typedef char bool;
-int64_t entry(void* heap);
+int64_t entry(void* heap, void* heap_start_addr, int64_t h_size);
 void printResult(int64_t value);
 void printBignum(int64_t value);
 void printValue(int64_t value);
@@ -46,7 +46,7 @@ int main(int argc, char** argv) {
 	}
 
 	/* Entry may either return a 64 bit value via a register or a pointer to a result */
-	int64_t  value = entry(heap);
+	int64_t  value = entry(heap, heap, heap_size);
 	
 	printResult(value);
 	
@@ -314,6 +314,12 @@ int64_t compValue(int64_t value1, int64_t value2) {
 /* Signal an error while executing the program */
 int error() {
 	printf("err\n");
+	exit(0); //The program being executed errored out, but the runtime system did not
+}
+
+/* Signal an error due to a full heap upon attemtpting to access the invalid position now being pointed to*/
+int nomem() {
+	printf("err: Heap is Full\n");
 	exit(0); //The program being executed errored out, but the runtime system did not
 }
 

@@ -215,7 +215,10 @@ type Variable =
 ;;Entry compile function
 ;;Expr -> ASM
 (define (compile expr)
-  `(,@(compile-e (desugar expr) '()) ;;Start with empty environment
+  `(
+    (mov (offset rsp -1) rsi)
+    (mov (offset rsp -2) rdx)
+    ,@(compile-e (desugar expr) '(#f #f)) ;;Start with empty environment
     ;;Since rsp is never moved beyond the initial stack fram setup, this sould revert the setup
     (pop r15)
     (pop r14)
@@ -229,6 +232,9 @@ type Variable =
     err
     (push rbp)
     (call error)
+    mem
+    (push rbp)
+    (call nomem)
     ret))
 
 ;;The toplevel compile function from which the compilation of an expression begins
@@ -280,6 +286,7 @@ type Variable =
 (define (compile-box e1 env)
   `(
     ,@(compile-e e1 env)
+    ,@(assert-heap-offset 0)
     (mov (offset rdi 0) rax) ;;Place the value on the heap
     (mov rax rdi) ;;Get the pointer to the boxed value
     (or rax ,type-box) ;;Tag the value as type box
@@ -376,6 +383,8 @@ type Variable =
       ;;Update the value of rdi as saved on the stack
       (mov rdi (offset rsp ,(- (+ 3 (length env)))))
       (add rdi 16)
+      ,@assert-heap
+      
       (mov (offset rsp ,(- (+ 3 (length env)))) rdi)
       
       
@@ -580,8 +589,10 @@ type Variable =
     `(,@c1
       (mov (offset rsp ,(- (add1 (length env)))) rax);;Save the result of evaluating the first expression on the stack
       ,@c2
+      ,@(assert-heap-offset 0)
       (mov rbx (offset rsp ,(- (add1 (length env)))))
       (mov (offset rdi 0) rbx) ;;Move the first value on the heap
+      ,@(assert-heap-offset 1)
       (mov (offset rdi 1) rax) ;;Move the second value on the heap
       (mov rbx rax) ;;Save the second value for use later. Make sure it is not overwritten before it is used
       (mov rax rdi) ;;Save a pointer to the beginning of the pair
@@ -597,6 +608,7 @@ type Variable =
       (or rax ,type-list);;Tag the pointer as a list
       ,end
       (add rdi 16)))) ;;Make rdi contain the address of the next free location on the heap
+      
 
 
 
@@ -696,6 +708,9 @@ type Variable =
       ;;Prep for/call decrement
       (mov (offset rsp ,(- (+ 4 (length env)))) rdi)
       (mov (offset rsp ,(- (+ 5 (length env)))) rsi)
+      ;;Make sure the space that will be used to store the GMP struct is within the bounds of the heap
+      ,@(assert-heap-offset 0)
+      ,@(assert-heap-offset 1)
       (mov rdi rax)
       (mov rsi (offset rsp ,(- (+ 4 (length env)))))
       (sub rsp ,stack-size)
@@ -706,25 +721,29 @@ type Variable =
       (mov rsi (offset rsp ,(- (+ 5 (length env))))) ;;Restore rsi
 
       (add rdi 16) ;;Skip over the gmp struct for the decremented value on the heap
-
-      ;;Create the range on the heap and return a pointer to it. Each gmp struct is 16 bits so rdi still remains a multiple of 8
+      
+      ;;Create the range on the heap and return a pointer to it. 
       ;;Place the beginning of the range on the heap
       (mov rax (offset rsp ,(- (add1 (length env)))))
       (or rax ,type-bignum)
+      ,@(assert-heap-offset 0)
       (mov (offset rdi 0) rax)
       
       (mov rax (offset rsp ,(- (+ 4 (length env))))) ;;Get the pointer to the decremented bignum
       (or rax ,type-bignum) ;;Tag the bignum
+      ,@(assert-heap-offset 1)
       (mov (offset rdi 1) rax)
 
       ;;Place the step value after the start and end value on the heap
       (mov rax (offset rsp ,(- (+ 3 (length env)))))
       (or rax ,type-bignum)
+      ,@(assert-heap-offset 2)
       (mov (offset rdi 2) rax)
 
       (mov rax rdi)
       (or rax ,type-range)
-      (add rdi 24)))) ;;Make rdi point to the next free position on the heap
+      (add rdi 24) ;;Make rdi point to the next free position on the heap
+      ,@assert-heap))) 
       
 
 ;;Compile a range expression, starting from the first integer and including the last integer
@@ -756,7 +775,7 @@ type Variable =
       (mov (offset rsp ,(- (+ 5 (length env)))) rsi)
 
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;pass the starting point of the range in rdi
-      (mov rsi (offset rsp ,(- (+ 2 (length env))))) ;;pass the ending point of the range in rdi
+      (mov rsi (offset rsp ,(- (+ 2 (length env))))) ;;pass the ending point of the range in rsi
 
       (sub rsp ,stack-size)
       (call compBignum)
@@ -774,17 +793,21 @@ type Variable =
       ;;Create the range on the heap and return a pointer to it. Each pointer to a gmp struct is 8 bytes, keepind rdi a multiple of 8
       (mov rax (offset rsp ,(- (add1 (length env)))))
       (or rax ,type-bignum)
+      ,@(assert-heap-offset 0)
       (mov (offset rdi 0) rax)
       (mov rax (offset rsp ,(- (+ 2 (length env)))))
       (or rax ,type-bignum)
+      ,@(assert-heap-offset 1)
       (mov (offset rdi 1) rax)
       (mov rax (offset rsp ,(- (+ 3 (length env)))))
       (or rax ,type-bignum)
+      ,@(assert-heap-offset 2)
       (mov (offset rdi 2) rax)
 
       (mov rax rdi)
       (or rax ,type-range)
       (add rdi 24)))) ;;Make rdi point to the next free position on the heap
+       
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile Boolean;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Compile a boolean into assembly, placing the value in rax
@@ -814,19 +837,30 @@ type Variable =
       ;;Compile the list of characters representing the number. Each character will take up one byte
       ;;The first byte will containt the length of the list of characters
       ,@(compile-char-list num-list)
+      ,@(assert-heap-offset 0)
       ;;Null terminate the string
       (mov rbx 0)
       (mov (offset rdi 0) rbx)
-      (add rdi 1) ;;So that rdi points to the next free position on the heap, not the last character
+      (add rdi 1) ;;So that rdi points to the next free position on the heap, not the last character.
+                  ;;This finishes the addition to rdi started in compile-char-list, thereby maintaining
+                  ;;rdi as a multiple of 8 bytes.
       
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Call the C function to compile a bignum into a GMP struct;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-      ;;Save the values in the registers used to pass arguments
+      ;;Save the values in the registers used to pass arguments. At this point, the last thing placed on the heap is the string representation of the
+      ;;bignum
       (mov (offset rsp ,(- (add1 (length env)))) rdi)
       (mov (offset rsp ,(- (+ 2 (length env)))) rsi)
 
+      ;;Make sure that the addreses to be occupied by the GMP struct are within the heap's bounds
+      ,@(assert-heap-offset 0)
+      ,@(assert-heap-offset 1)
+      
       ;;Store arguments in the registers used to pass arguments to the function
       (mov rdi rax);;Pointer to the begining of the string rep of the bignum
-      (mov rsi rdi);;Pointer to the next available space on the heap where the GPM struct will go
+      (mov rsi rdi);;Pointer to the next available space on the heap where the GPM struct will go.
+                   ;;This is intentionally the same as the beginning of the string because once
+                   ;;we have read from it, we no longer need it and can overwrite its values. We
+                   ;;just have to make sure that the reading takes place before writing.
 
       (mov r15 rsi);;Save a copy of the address of the struct in r15
 
@@ -839,12 +873,11 @@ type Variable =
       (add rsp ,stack-size)
 
       ;;Restore the registers that were used to pass arguments
-      (mov rdi (offset rsp ,(- (add1 (length env)))))
+      (mov rdi r15) ;;rdi has now been reset to its position before the string representation of the num was placed on the heap
       (mov rsi (offset rsp ,(- (+ 2 (length env)))))
 
-      ;;make rdi point to the next avialable position on the heap
+      ;;make rdi point to the next avialable position on the heap by skipping the GMP struct
       (add rdi rax)
-
       
       ;;Tag the result as a gmp_struct
       (mov rax r15)
@@ -1244,6 +1277,7 @@ type Variable =
       ;;Set rdi to the next free position on the heap. Add 16 because an mpz_t has a
       ;;size of 16 bytes. This may change in the future
       (add rdi 16)
+      ,@assert-heap
       
       ;;Return a tagged pointer to the result on the heap
       (mov rax (offset rsp ,(- (+ 3 (length env)))))
@@ -1300,6 +1334,7 @@ type Variable =
       ;;Set rdi to the next free position on the heap. Add 16 because an mpz_t has a
       ;;size of 16 bytes. This may change in the future
       (add rdi 16)
+      ,@assert-heap
       
       ;;Return a tagged pointer to the result on the heap
       (mov rax (offset rsp ,(- (+ 3 (length env)))))
@@ -1342,7 +1377,7 @@ type Variable =
     (jne err)))
     
 
-;;A variable that holds ASM for confirming that the value in rax is a pair or a list
+;;A function that holds ASM for confirming that the value in rax is a pair or a list
 (define (assert-pair-list)
   (let ((end (gensym "end")))
     `((mov rbx rax)
@@ -1352,6 +1387,24 @@ type Variable =
       (cmp rbx ,type-list)
       (jne err)
       ,end)))
+
+;;A variable that holds ASM for determining if the heap pointer has exceeded the last
+;;available position on the heap
+(define assert-heap
+  `((mov rbx rdi)
+    (sub rbx (offset rsp -1)) ;;Find the difference between the current position on the heap and the beginning of the heap
+    (cmp rbx (offset rsp -2)) ;;Compare the difference to the size of the heap
+    (jge mem)))
+
+;;Determine if the heap pointer offseted by the offset value is still within the bounds of the heap
+;;Integer -> ASM
+(define (assert-heap-offset offset)
+  `((mov rbx rdi)
+    (add rbx ,(* 8 offset))
+    (sub rbx (offset rsp -1)) ;;Find the difference between the current position on the heap and the beginning of the heap
+    (cmp rbx (offset rsp -2)) ;;Compare the difference to the size of the heap
+    (jge mem)))
+    
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Helper Functions;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Compile a list of expressions
@@ -1374,10 +1427,14 @@ type Variable =
     [(cons c lst)
      ;;Place the character on the heap
     `(
+      ,@(assert-heap-offset 0) ;;Ensure that rdi is within the bounds of the heap
       (mov rbx ,(char->integer c))
       (mov (offset rdi 0) rbx)
-      ;;Advance to the next free position on the heap
+      
+      ;;Advance to the next free position on the heap. No need to assert-heap
+      ;;since an out of bounds heap pointer is only a problem if it is dereferenced
       (add rdi 1)
+      
       ;;Compile the rest of the list
       ,@(compile-char-list lst))]))
 
