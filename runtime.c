@@ -16,7 +16,7 @@
 #define type_range 0b110
 #define type_empty_list 0b111
 
-#define heap_size 100000000
+#define heap_size 8000000000
 
 #define true 1
 #define false 0
