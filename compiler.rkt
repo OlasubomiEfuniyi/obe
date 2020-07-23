@@ -16,6 +16,9 @@
 (define type-range #b110)
 (define type-empty-list #b111)
 
+;;Used to tag non program values that are placed on the stack
+(define type-temp-storage #b1000)
+
 
 
 
@@ -337,10 +340,10 @@ type Variable =
 (define (compile-for v e-rng exprs env)
   (let ((c-rng (compile-e e-rng env))
         ;;reserve four spots on the stack where the beginning of the range, end of the range, rdi and rsi will reside.
-        (c-exprs (compile-es exprs (extend #f (extend #f (extend #f (extend v env))))))
+        (c-exprs (compile-es exprs (extend #f (extend #f (extend #f (extend #f (extend #f (extend v env))))))))
         (end (gensym "end"))
         (loop (gensym "loop"))
-        (stack-size (* 8 (+ 4 (length env)))))
+        (stack-size (* 8 (+ 6 (length env)))))
 
     `(,@c-rng ;;Compile the range
       
@@ -357,19 +360,22 @@ type Variable =
       ;;Save rdi and rsi at the top of the stack
       (mov (offset rsp ,(- (add1 (length env)))) rbx)
       (mov (offset rsp ,(- (+ 2 (length env)))) rax)
-      (mov (offset rsp ,(- (+ 3 (length env)))) rdi)
-      (mov (offset rsp ,(- (+ 4 (length env)))) rsi)
+      (mov r15 ,type-temp-storage)
+      (mov (offset rsp ,(- (+ 3 (length env)))) r15) ;;Says that whatever comes next is temporarily stored. Not to be confused with a program value
+      (mov (offset rsp ,(- (+ 4 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 5 (length env)))) r15)
+      (mov (offset rsp ,(- (+ 6 (length env)))) rsi)
       
       ,loop
      
       ,@c-exprs ;;Execute the expressions
-      (mov (offset rsp ,(- (+ 3 (length env)))) rdi) ;;The body of the loop may have updated rdi
+      (mov (offset rsp ,(- (+ 4 (length env)))) rdi) ;;The body of the loop may have updated rdi
       
       ;;Increment the bignum in rbx and compare it with the bignum in rax to determine when to stop
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;The first argument is the bignum to be incremented
       ;;The second argument is an untagged pointer to a position on the heap where the resulting
       ;;GMP struct should ge placed
-      (mov rsi (offset rsp ,(- (+ 3 (length env)))))
+      (mov rsi (offset rsp ,(- (+ 4 (length env)))))
       ;;Update the new begining of the range on the stack.
       ;;Keep the invariant that the value is tagged
       (or rsi ,type-bignum)
@@ -381,11 +387,11 @@ type Variable =
       (call increment)
       (add rsp ,stack-size) ;;Restore the stack
       ;;Update the value of rdi as saved on the stack
-      (mov rdi (offset rsp ,(- (+ 3 (length env)))))
+      (mov rdi (offset rsp ,(- (+ 4 (length env)))))
       (add rdi 16)
       ,@assert-heap
       
-      (mov (offset rsp ,(- (+ 3 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 4 (length env)))) rdi)
       
       
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;make the incremented value the first argument to the comparison of the current value and the end of the range
@@ -396,8 +402,8 @@ type Variable =
       (call compBignum)
       (add rsp ,stack-size)
       
-      (mov rdi (offset rsp ,(- (+ 3 (length env)))));;Restore rdi
-      (mov rsi (offset rsp ,(- (+ 4 (length env)))));;Restore rsi
+      (mov rdi (offset rsp ,(- (+ 4 (length env)))));;Restore rdi
+      (mov rsi (offset rsp ,(- (+ 6 (length env)))));;Restore rsi
       
       (cmp rax 0) ;;If the return value of compBignum is <= 0, then loop
       (jle ,loop)
