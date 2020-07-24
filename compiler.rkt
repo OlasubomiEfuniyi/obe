@@ -16,8 +16,9 @@
 (define type-range #b110)
 (define type-empty-list #b111)
 
-;;Used to tag non program values that are placed on the stack
-(define type-temp-storage #b1000)
+;;Used to tag non program values that are placed on the stack. This value works because it is impossible for a
+;;program to place this value on the stack
+(define type-temp-storage #b000)
 
 
 
@@ -219,9 +220,12 @@ type Variable =
 ;;Expr -> ASM
 (define (compile expr)
   `(
-    (mov (offset rsp -1) rsi)
-    (mov (offset rsp -2) rdx)
-    ,@(compile-e (desugar expr) '(#f #f)) ;;Start with empty environment
+    (mov r15 ,type-temp-storage)
+    (mov (offset rsp -1) r15)
+    (mov (offset rsp -2) rsi)
+    (mov (offset rsp -3) r15)
+    (mov (offset rsp -4) rdx)
+    ,@(compile-e (desugar expr) '(#f #f #f #f))
     ;;Since rsp is never moved beyond the initial stack fram setup, this sould revert the setup
     (pop r15)
     (pop r14)
@@ -422,13 +426,15 @@ type Variable =
 ;;Expr CEnv -> ASM
 (define (compile-println e1 env)
   (let ((c1 (compile-e e1 env))
-        (stack-size (* 8 (+ 1 (length env)))))
+        (stack-size (* 8 (+ 2 (length env)))))
     `(,@c1
 
       ;;;;;;;;;;;;;;;::Call printResult to display the result of evaluating e1;;;;;;;;;;;;;;;;;;;;;;;;
 
       ;;Save the value in rdi before using it to pass argument to printResult
-      (mov (offset rsp ,(- (add1 (length env)))) rdi)
+      (mov r15 ,type-temp-storage)
+      (mov (offset rsp ,(- (add1 (length env)))) r15)
+      (mov (offset rsp ,(- (+ 2 (length env)))) rdi)
 
       ;;Pass argument in rdi
       (mov rdi rax)
@@ -442,7 +448,7 @@ type Variable =
       (add rsp ,stack-size)
 
       ;;Restore rdi
-      (mov rdi (offset rsp ,(- (add1 (length env)))))
+      (mov rdi (offset rsp ,(- (+ 2 (length env)))))
 
       ;;Return #t
       (mov rax ,type-true))))
@@ -671,7 +677,7 @@ type Variable =
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
         (c3 (compile-e e3 (extend #f (extend #f env))))
-        (stack-size (* 8 (+ 5 (length env)))))
+        (stack-size (* 8 (+ 7 (length env)))))
     `(,@c1
       ,@assert-bignum
       (xor rax ,type-bignum) ;;Untag the pointer to the bignum
@@ -689,9 +695,12 @@ type Variable =
       
       ;;;;;;;;;;;;;Make sure the starting point is strictly less than the ending point usig compBignum;;;;;;;;;;;;;;;
 
+      (mov r15 ,type-temp-storage)
       ;;Prep for call to compBignum
-      (mov (offset rsp ,(- (+ 4 (length env)))) rdi)
-      (mov (offset rsp ,(- (+ 5 (length env)))) rsi)
+      (mov (offset rsp ,(- (+ 4 (length env)))) r15)
+      (mov (offset rsp ,(- (+ 5 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 6 (length env)))) r15)
+      (mov (offset rsp ,(- (+ 7 (length env)))) rsi)
 
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;pass the starting point of the range in rdi
       (mov rsi (offset rsp ,(- (+ 2 (length env))))) ;;pass the ending point of the range in rdi
@@ -701,8 +710,8 @@ type Variable =
       (add rsp ,stack-size)
 
       ;;Restore the registers used to pass arguments to compBignum
-      (mov rdi (offset rsp ,(- (+ 4 (length env)))))
-      (mov rsi (offset rsp ,(- (+ 5 (length env)))))
+      (mov rdi (offset rsp ,(- (+ 5 (length env)))))
+      (mov rsi (offset rsp ,(- (+ 7 (length env)))))
 
       ;;Use the result of compBignum to check that the starting point is strictly less than the ending point
       (cmp rax 0)
@@ -712,19 +721,19 @@ type Variable =
       (mov rax (offset rsp ,(- (+ 2 (length env)))))
 
       ;;Prep for/call decrement
-      (mov (offset rsp ,(- (+ 4 (length env)))) rdi)
-      (mov (offset rsp ,(- (+ 5 (length env)))) rsi)
+      (mov (offset rsp ,(- (+ 5 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 7 (length env)))) rsi)
       ;;Make sure the space that will be used to store the GMP struct is within the bounds of the heap
       ,@(assert-heap-offset 0)
       ,@(assert-heap-offset 1)
       (mov rdi rax)
-      (mov rsi (offset rsp ,(- (+ 4 (length env)))))
+      (mov rsi (offset rsp ,(- (+ 5 (length env)))))
       (sub rsp ,stack-size)
       (call decrement)
 
       (add rsp ,stack-size) ;;Restore the stack
-      (mov rdi (offset rsp ,(- (+ 4 (length env))))) ;;Restore rdi
-      (mov rsi (offset rsp ,(- (+ 5 (length env))))) ;;Restore rsi
+      (mov rdi (offset rsp ,(- (+ 5 (length env))))) ;;Restore rdi
+      (mov rsi (offset rsp ,(- (+ 7 (length env))))) ;;Restore rsi
 
       (add rdi 16) ;;Skip over the gmp struct for the decremented value on the heap
       
@@ -735,7 +744,7 @@ type Variable =
       ,@(assert-heap-offset 0)
       (mov (offset rdi 0) rax)
       
-      (mov rax (offset rsp ,(- (+ 4 (length env))))) ;;Get the pointer to the decremented bignum
+      (mov rax (offset rsp ,(- (+ 5 (length env))))) ;;Get the pointer to the decremented bignum
       (or rax ,type-bignum) ;;Tag the bignum
       ,@(assert-heap-offset 1)
       (mov (offset rdi 1) rax)
@@ -758,7 +767,7 @@ type Variable =
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
         (c3 (compile-e e3 (extend #f (extend #f env))))
-        (stack-size (* 8 (+ 5 (length env)))))
+        (stack-size (* 8 (+ 7 (length env)))))
     `(,@c1
       ,@assert-bignum
       (xor rax ,type-bignum) ;;Untag the pointer to the bignum
@@ -776,9 +785,12 @@ type Variable =
       
       ;;;;;;;;;;;;;Make sure the starting point is less than or equal to the ending point usig compBignum;;;;;;;;;;;;;;;
 
+      (mov r15 ,type-temp-storage)
       ;;Prep for call to compBignum
-      (mov (offset rsp ,(- (+ 4 (length env)))) rdi)
-      (mov (offset rsp ,(- (+ 5 (length env)))) rsi)
+      (mov (offset rsp ,(- (+ 4 (length env)))) r15)
+      (mov (offset rsp ,(- (+ 5 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 6 (length env)))) r15)
+      (mov (offset rsp ,(- (+ 7 (length env)))) rsi)
 
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;pass the starting point of the range in rdi
       (mov rsi (offset rsp ,(- (+ 2 (length env))))) ;;pass the ending point of the range in rsi
@@ -788,8 +800,8 @@ type Variable =
       (add rsp ,stack-size)
 
       ;;Restore the registers used to pass arguments to compBignum
-      (mov rdi (offset rsp ,(- (+ 4 (length env)))))
-      (mov rsi (offset rsp ,(- (+ 5 (length env)))))
+      (mov rdi (offset rsp ,(- (+ 5 (length env)))))
+      (mov rsi (offset rsp ,(- (+ 7 (length env)))))
 
       ;;Use the result of compBignum to check that the starting point is less than or equal to the ending point
       (cmp rax 0)
@@ -836,7 +848,7 @@ type Variable =
          (num-string-padded (string-append num-string padding))
          ;;Using the padded num-string ensures that rdi remains at an 8 byte boundary
          (num-list (string->list num-string-padded))
-         (stack-size (* 8 (+ 2 (length env)))))
+         (stack-size (* 8 (+ 4 (length env)))))
     `(
       ;;Save the pointer to the beginning of the list
       (mov rax rdi)
@@ -854,8 +866,11 @@ type Variable =
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Call the C function to compile a bignum into a GMP struct;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       ;;Save the values in the registers used to pass arguments. At this point, the last thing placed on the heap is the string representation of the
       ;;bignum
-      (mov (offset rsp ,(- (add1 (length env)))) rdi)
-      (mov (offset rsp ,(- (+ 2 (length env)))) rsi)
+      (mov r15 ,type-temp-storage)
+      (mov (offset rsp ,(- (add1 (length env)))) r15)
+      (mov (offset rsp ,(- (+ 2 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 3 (length env)))) r15)
+      (mov (offset rsp ,(- (+ 4 (length env)))) rsi)
 
       ;;Make sure that the addreses to be occupied by the GMP struct are within the heap's bounds
       ,@(assert-heap-offset 0)
@@ -880,7 +895,7 @@ type Variable =
 
       ;;Restore the registers that were used to pass arguments
       (mov rdi r15) ;;rdi has now been reset to its position before the string representation of the num was placed on the heap
-      (mov rsi (offset rsp ,(- (+ 2 (length env)))))
+      (mov rsi (offset rsp ,(- (+ 4 (length env)))))
 
       ;;make rdi point to the next avialable position on the heap by skipping the GMP struct
       (add rdi rax)
@@ -906,7 +921,7 @@ type Variable =
 (define (compile-greater e1 e2 env)
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
-        (stack-size (* 8 (+ 3 (length env))))
+        (stack-size (* 8 (+ 5 (length env))))
         (false (gensym "false"))
         (end (gensym "end")))
     `(,@c1
@@ -918,12 +933,13 @@ type Variable =
       ,@c2
       ,@assert-bignum
       (xor rax ,type-bignum);;Untag the pointer
-      ;;Save the stack
-      (mov r15 rsp) ;;The function being called will take care of setting and restoring rbp
 
       ;;Save the registers used to pass in arguments
-      (mov (offset rsp ,(- (+ 2 (length env)))) rdi)
-      (mov (offset rsp ,(- (+ 3 (length env)))) rsi)
+      (mov r15 ,type-temp-storage)
+      (mov (offset rsp ,(- (+ 2 (length env)))) r15)
+      (mov (offset rsp ,(- (+ 3 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 4 (length env)))) r15)
+      (mov (offset rsp ,(- (+ 5 (length env)))) rsi)
 
       ;;Call compBignum
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;Pass the first argument
@@ -931,19 +947,11 @@ type Variable =
 
       (sub rsp ,stack-size)
       (call compBignum)
-
-      ;;Make sure the stack is as expected and then restore the stack
-      ;;stack pointer to where it was before the setup for the function
-      ;;call
-      (mov rbx r15) ;;Get the previous base of the stack
-      (sub rbx rsp) ;;Subtract it from the top of the stack. This should give us the stack size if everything went well
-      (cmp rbx ,stack-size)
-      (jne err)
-      (mov rsp r15)
+      (add rsp ,stack-size)
 
       ;;Restore the registers used to pass arguments
-      (mov rdi (offset rsp ,(- (+ 2 (length env)))))
-      (mov rsi (offset rsp ,(- (+ 3 (length env)))))
+      (mov rdi (offset rsp ,(- (+ 3 (length env)))))
+      (mov rsi (offset rsp ,(- (+ 5 (length env)))))
 
       ;;Determine the appropriate boolean value to return
       (mov rbx 0)
@@ -960,7 +968,7 @@ type Variable =
 (define (compile-less e1 e2 env)
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
-        (stack-size (* 8 (+ 3 (length env))))
+        (stack-size (* 8 (+ 5 (length env))))
         (false (gensym "false"))
         (end (gensym "end")))
     `(,@c1
@@ -972,12 +980,13 @@ type Variable =
       ,@c2
       ,@assert-bignum
       (xor rax ,type-bignum);;Untag the pointer
-      ;;Save the stack
-      (mov r15 rsp) ;;The function being called will take care of setting and restoring rbp
-
+      
+      (mov r15 ,type-temp-storage)
       ;;Save the registers used to pass in arguments
-      (mov (offset rsp ,(- (+ 2 (length env)))) rdi)
-      (mov (offset rsp ,(- (+ 3 (length env)))) rsi)
+      (mov (offset rsp ,(- (+ 2 (length env)))) r15)
+      (mov (offset rsp ,(- (+ 3 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 4 (length env)))) r15)
+      (mov (offset rsp ,(- (+ 5 (length env)))) rsi)
 
       ;;Call compBignum
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;Pass the first argument
@@ -985,19 +994,11 @@ type Variable =
 
       (sub rsp ,stack-size)
       (call compBignum)
-
-      ;;Make sure the stack is as expected and then restore the stack
-      ;;stack pointer to where it was before the setup for the function
-      ;;call
-      (mov rbx r15) ;;Get the previous base of the stack
-      (sub rbx rsp) ;;Subtract it from the top of the stack. This should give us the stack size if everything went well
-      (cmp rbx ,stack-size)
-      (jne err)
-      (mov rsp r15)
+      (add rsp ,stack-size)
 
       ;;Restore the registers used to pass arguments
-      (mov rdi (offset rsp ,(- (+ 2 (length env)))))
-      (mov rsi (offset rsp ,(- (+ 3 (length env)))))
+      (mov rdi (offset rsp ,(- (+ 3 (length env)))))
+      (mov rsi (offset rsp ,(- (+ 5 (length env)))))
 
       ;;Determine the appropriate boolean value to return
       (mov rbx 0)
@@ -1014,7 +1015,7 @@ type Variable =
 (define (compile-greater-equal e1 e2 env)
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
-        (stack-size (* 8 (+ 3 (length env))))
+        (stack-size (* 8 (+ 5 (length env))))
         (false (gensym "false"))
         (end (gensym "end")))
     `(,@c1
@@ -1026,12 +1027,13 @@ type Variable =
       ,@c2
       ,@assert-bignum
       (xor rax ,type-bignum);;Untag the pointer
-      ;;Save the stack
-      (mov r15 rsp) ;;The function being called will take care of setting and restoring rbp
 
+      (mov r15 ,type-temp-storage)
       ;;Save the registers used to pass in arguments
-      (mov (offset rsp ,(- (+ 2 (length env)))) rdi)
-      (mov (offset rsp ,(- (+ 3 (length env)))) rsi)
+      (mov (offset rsp ,(- (+ 2 (length env)))) r15)
+      (mov (offset rsp ,(- (+ 3 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 4 (length env)))) r15)
+      (mov (offset rsp ,(- (+ 5 (length env)))) rsi)
 
       ;;Call compBignum
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;Pass the first argument
@@ -1039,19 +1041,11 @@ type Variable =
 
       (sub rsp ,stack-size)
       (call compBignum)
-
-      ;;Make sure the stack is as expected and then restore the stack
-      ;;stack pointer to where it was before the setup for the function
-      ;;call
-      (mov rbx r15) ;;Get the previous base of the stack
-      (sub rbx rsp) ;;Subtract it from the top of the stack. This should give us the stack size if everything went well
-      (cmp rbx ,stack-size)
-      (jne err)
-      (mov rsp r15)
+      (add rsp ,stack-size)
 
       ;;Restore the registers used to pass arguments
-      (mov rdi (offset rsp ,(- (+ 2 (length env)))))
-      (mov rsi (offset rsp ,(- (+ 3 (length env)))))
+      (mov rdi (offset rsp ,(- (+ 3 (length env)))))
+      (mov rsi (offset rsp ,(- (+ 5 (length env)))))
 
       ;;Determine the appropriate boolean value to return
       (mov rbx 0)
@@ -1068,7 +1062,7 @@ type Variable =
 (define (compile-less-equal e1 e2 env)
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
-        (stack-size (* 8 (+ 3 (length env))))
+        (stack-size (* 8 (+ 5 (length env))))
         (false (gensym "false"))
         (end (gensym "end")))
     `(,@c1
@@ -1080,12 +1074,13 @@ type Variable =
       ,@c2
       ,@assert-bignum
       (xor rax ,type-bignum);;Untag the pointer
-      ;;Save the stack
-      (mov r15 rsp) ;;The function being called will take care of setting and restoring rbp
 
+      (mov r15 ,type-temp-storage)
       ;;Save the registers used to pass in arguments
-      (mov (offset rsp ,(- (+ 2 (length env)))) rdi)
-      (mov (offset rsp ,(- (+ 3 (length env)))) rsi)
+      (mov (offset rsp ,(- (+ 2 (length env)))) r15)
+      (mov (offset rsp ,(- (+ 3 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 4 (length env)))) r15)
+      (mov (offset rsp ,(- (+ 5 (length env)))) rsi)
 
       ;;Call compBignum
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;Pass the first argument
@@ -1093,19 +1088,11 @@ type Variable =
 
       (sub rsp ,stack-size)
       (call compBignum)
-
-      ;;Make sure the stack is as expected and then restore the stack
-      ;;stack pointer to where it was before the setup for the function
-      ;;call
-      (mov rbx r15) ;;Get the previous base of the stack
-      (sub rbx rsp) ;;Subtract it from the top of the stack. This should give us the stack size if everything went well
-      (cmp rbx ,stack-size)
-      (jne err)
-      (mov rsp r15)
+      (add rsp ,stack-size)
 
       ;;Restore the registers used to pass arguments
-      (mov rdi (offset rsp ,(- (+ 2 (length env)))))
-      (mov rsi (offset rsp ,(- (+ 3 (length env)))))
+      (mov rdi (offset rsp ,(- (+ 3 (length env)))))
+      (mov rsi (offset rsp ,(- (+ 5 (length env)))))
 
       ;;Determine the appropriate boolean value to return
       (mov rbx 0)
@@ -1122,7 +1109,7 @@ type Variable =
 (define (compile-equal e1 e2 env)
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
-        (stack-size (* 8 (+ 4 (length env))))
+        (stack-size (* 8 (+ 6 (length env))))
         (false (gensym "false"))
         (end (gensym "end"))
         (bignum (gensym "bignum"))
@@ -1146,13 +1133,13 @@ type Variable =
       (and r11 ,type-mask)
       (cmp r10 r11)
       (jne ,false)
-      
-      ;;Save the stack
-      (mov r15 rsp) ;;The function being called will take care of setting and restoring rbp
 
+      (mov r15 ,type-temp-storage)
       ;;Save the registers used to pass in arguments
-      (mov (offset rsp ,(- (+ 3 (length env)))) rdi)
-      (mov (offset rsp ,(- (+ 4 (length env)))) rsi)
+      (mov (offset rsp ,(- (+ 3 (length env)))) r15)
+      (mov (offset rsp ,(- (+ 4 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 5 (length env)))) r15)
+      (mov (offset rsp ,(- (+ 6 (length env)))) rsi)
 
       ;;Call compBignum
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;Pass the first argument
@@ -1208,18 +1195,11 @@ type Variable =
       (jmp ,end)
       
       ,continue
-      ;;Make sure the stack is as expected and then restore the stack
-      ;;stack pointer to where it was before the setup for the function
-      ;;call
-      (mov rbx r15) ;;Get the previous base of the stack
-      (sub rbx rsp) ;;Subtract it from the top of the stack. This should give us the stack size if everything went well
-      (cmp rbx ,stack-size)
-      (jne err)
-      (mov rsp r15)
+      (add rsp ,stack-size)
 
       ;;Restore the registers used to pass arguments
-      (mov rdi (offset rsp ,(- (+ 3 (length env)))))
-      (mov rsi (offset rsp ,(- (+ 4 (length env)))))
+      (mov rdi (offset rsp ,(- (+ 4 (length env)))))
+      (mov rsi (offset rsp ,(- (+ 6 (length env)))))
 
       ;;Determine the appropriate boolean value to return
       (mov rbx 0)
@@ -1237,7 +1217,7 @@ type Variable =
 (define (compile-add e1 e2 env)
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
-        (stack-size (* 8 (+ 5 (length env)))))
+        (stack-size (* 8 (+ 8 (length env)))))
     `(,@c1
       ,@assert-bignum
       ;;Untag the address before placing it on the stack
@@ -1250,10 +1230,14 @@ type Variable =
       (xor rax ,type-bignum)
       (mov (offset rsp ,(- (+ 2 (length env)))) rax) ;;Save the result of evaluating the second expression on the stack to prevent loss when external functions are called
 
+      (mov r15 ,type-temp-storage)
       ;;Save the registers used to pass in arguments
-      (mov (offset rsp ,(- (+ 3 (length env)))) rdi) 
-      (mov (offset rsp ,(- (+ 4 (length env)))) rsi)
-      (mov (offset rsp ,(- (+ 5 (length env)))) rdx)
+      (mov (offset rsp ,(- (+ 3 (length env)))) r15)
+      (mov (offset rsp ,(- (+ 4 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 5 (length env)))) r15)
+      (mov (offset rsp ,(- (+ 6 (length env)))) rsi)
+      (mov (offset rsp ,(- (+ 7 (length env)))) r15)
+      (mov (offset rsp ,(- (+ 8 (length env)))) rdx)
 
       ;;Setup for the gmp function calls required to add two bignums.
       ;;No need to do anything with rdi since it already contains the address of
@@ -1265,7 +1249,7 @@ type Variable =
      
       ;;add the two bignums and save the result in the newly initialized struct
       (add rsp ,stack-size) ;;Restore the stack to access the arguments for calling the addition function
-      (mov rdi (offset rsp ,(- (+ 3 (length env)))))
+      (mov rdi (offset rsp ,(- (+ 4 (length env)))))
       (mov rsi (offset rsp ,(- (add1 (length env))))) ;;Untagged pointer to the first bignum
       (mov rdx (offset rsp ,(- (+ 2 (length env))))) ;;Untagged pointer to the second bignum
 
@@ -1276,9 +1260,9 @@ type Variable =
       (add rsp ,stack-size)
 
       ;;Restore the registers used to pass arguments
-      (mov rdi (offset rsp ,(- (+ 3 (length env)))))
-      (mov rsi (offset rsp ,(- (+ 4 (length env)))))
-      (mov rdx (offset rsp ,(- (+ 5 (length env)))))
+      (mov rdi (offset rsp ,(- (+ 4 (length env)))))
+      (mov rsi (offset rsp ,(- (+ 6 (length env)))))
+      (mov rdx (offset rsp ,(- (+ 8 (length env)))))
 
       ;;Set rdi to the next free position on the heap. Add 16 because an mpz_t has a
       ;;size of 16 bytes. This may change in the future
@@ -1286,7 +1270,7 @@ type Variable =
       ,@assert-heap
       
       ;;Return a tagged pointer to the result on the heap
-      (mov rax (offset rsp ,(- (+ 3 (length env)))))
+      (mov rax (offset rsp ,(- (+ 4 (length env)))))
       (or rax ,type-bignum))))
 
 ;;Compile the subtraction of two bignums
@@ -1294,7 +1278,7 @@ type Variable =
 (define (compile-sub e1 e2 env)
    (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
-        (stack-size (* 8 (+ 5 (length env)))))
+        (stack-size (* 8 (+ 8 (length env)))))
     `(,@c1
       ,@assert-bignum
       ;;Untag the address before placing it on the stack
@@ -1308,9 +1292,13 @@ type Variable =
       (mov (offset rsp ,(- (+ 2 (length env)))) rax) ;;Save the result of evaluating the second expression on the stack to prevent loss when external functions are called
 
       ;;Save the registers used to pass in arguments
-      (mov (offset rsp ,(- (+ 3 (length env)))) rdi) 
-      (mov (offset rsp ,(- (+ 4 (length env)))) rsi)
-      (mov (offset rsp ,(- (+ 5 (length env)))) rdx)
+      (mov r15 ,stack-size)
+      (mov (offset rsp ,(- (+ 3 (length env)))) r15)
+      (mov (offset rsp ,(- (+ 4 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 5 (length env)))) r15)
+      (mov (offset rsp ,(- (+ 6 (length env)))) rsi)
+      (mov (offset rsp ,(- (+ 7 (length env)))) r15)
+      (mov (offset rsp ,(- (+ 8 (length env)))) rdx)
 
       ;;Setup for the gmp function calls required to add two bignums.
       ;;No need to do anything with rdi since it already contains the address of
@@ -1322,7 +1310,7 @@ type Variable =
      
       ;;add the two bignums and save the result in the newly initialized struct
       (add rsp ,stack-size) ;;Restore the stack to access the arguments for calling the addition function
-      (mov rdi (offset rsp ,(- (+ 3 (length env)))))
+      (mov rdi (offset rsp ,(- (+ 4 (length env)))))
       (mov rsi (offset rsp ,(- (add1 (length env))))) ;;Untagged pointer to the first bignum
       (mov rdx (offset rsp ,(- (+ 2 (length env))))) ;;Untagged pointer to the second bignum
 
@@ -1333,9 +1321,9 @@ type Variable =
       (add rsp ,stack-size)
 
       ;;Restore the registers used to pass arguments
-      (mov rdi (offset rsp ,(- (+ 3 (length env)))))
-      (mov rsi (offset rsp ,(- (+ 4 (length env)))))
-      (mov rdx (offset rsp ,(- (+ 5 (length env)))))
+      (mov rdi (offset rsp ,(- (+ 4 (length env)))))
+      (mov rsi (offset rsp ,(- (+ 6 (length env)))))
+      (mov rdx (offset rsp ,(- (+ 8 (length env)))))
 
       ;;Set rdi to the next free position on the heap. Add 16 because an mpz_t has a
       ;;size of 16 bytes. This may change in the future
@@ -1343,7 +1331,7 @@ type Variable =
       ,@assert-heap
       
       ;;Return a tagged pointer to the result on the heap
-      (mov rax (offset rsp ,(- (+ 3 (length env)))))
+      (mov rax (offset rsp ,(- (+ 4 (length env)))))
       (or rax ,type-bignum))))
   
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Assertions;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1398,8 +1386,8 @@ type Variable =
 ;;available position on the heap
 (define assert-heap
   `((mov rbx rdi)
-    (sub rbx (offset rsp -1)) ;;Find the difference between the current position on the heap and the beginning of the heap
-    (cmp rbx (offset rsp -2)) ;;Compare the difference to the size of the heap
+    (sub rbx (offset rsp -2)) ;;Find the difference between the current position on the heap and the beginning of the heap
+    (cmp rbx (offset rsp -4)) ;;Compare the difference to the size of the heap
     (jge mem)))
 
 ;;Determine if the heap pointer offseted by the offset value is still within the bounds of the heap
@@ -1407,8 +1395,8 @@ type Variable =
 (define (assert-heap-offset offset)
   `((mov rbx rdi)
     (add rbx ,(* 8 offset))
-    (sub rbx (offset rsp -1)) ;;Find the difference between the current position on the heap and the beginning of the heap
-    (cmp rbx (offset rsp -2)) ;;Compare the difference to the size of the heap
+    (sub rbx (offset rsp -2)) ;;Find the difference between the current position on the heap and the beginning of the heap
+    (cmp rbx (offset rsp -4)) ;;Compare the difference to the size of the heap
     (jge mem)))
     
 
