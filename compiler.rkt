@@ -5,16 +5,30 @@
 (module+ test
   (require rackunit))
 
-(define shift 3)
-(define type-mask #b111)
-(define type-box #b000)
-(define type-bignum #b001)
-(define type-true #b010)
-(define type-false #b011)
-(define type-list #b100)
-(define type-pair #b101)
-(define type-range #b110)
-(define type-empty-list #b111)
+;;When it comes to pointers to chunks on the heap, this shift is not useful since the fact that pointers are already 8 byte aligned
+;;means we can get away without shifting the address
+(define result-shift 3)
+;;Immmediate values are tagged with #b000 at their beginning. After that, the next 3 bits tell you what specific immediat value you
+;;are dealing with.
+(define imm-shift (+ 3 result-shift))
+;;A mask to figure out what type of result we have at hand (is it an immediate or a pointer to a chunk?)
+(define result-type-mask (sub1 (arithmetic-shift 1 result-shift)))
+;;A mask to figure out what type of immediate value we have at hand.
+(define imm-type-mask (sub1 (arithmetic-shift 1 imm-shift)))
+  
+;;These first 3 bits indicate a value is an immediate value. 
+(define type-imm #b000);
+;;The remaining 7 possible combinations are used to indicate the type of different chunks on the heap
+(define type-box #b001)
+(define type-bignum #b010)
+(define type-list #b011)
+(define type-pair #b100)
+(define type-range #b101)
+
+;;Immadiate Values
+(define type-true  (arithmetic-shift #b000 result-shift))
+(define type-false (arithmetic-shift #b001 result-shift))
+(define type-empty-list (arithmetic-shift #b010 result-shift))
 
 
 
@@ -476,7 +490,7 @@ type Variable =
      `(,@(compile-e expr (append (make-list (length new-env) #f) env))
       ,@(assert-pair-list) ;;This binding syntax is only valid for pairs
       (mov rbx rax)
-      (and rbx ,type-mask)
+      (and rbx ,result-type-mask)
       (cmp rbx ,type-pair)
       (je ,untag-pair)
       ;;If we reached here, assert-pair-list passed, so since it is not a pair, it must be a list
@@ -496,7 +510,7 @@ type Variable =
      `(,@(compile-e expr (append (make-list (length new-env) #f) env))
       ,@(assert-pair-list) ;;This binding syntax is only valid for pairs
       (mov rbx rax)
-      (and rbx ,type-mask)
+      (and rbx ,result-type-mask)
       (cmp rbx ,type-pair)
       (je ,untag-pair)
       (xor rax ,type-list)
@@ -596,10 +610,10 @@ type Variable =
       (mov (offset rdi 1) rax) ;;Move the second value on the heap
       (mov rbx rax) ;;Save the second value for use later. Make sure it is not overwritten before it is used
       (mov rax rdi) ;;Save a pointer to the beginning of the pair
-      ;;Determine if this is a list or just a pair. It is a list of the second operand is a list or the empty list
+      ;;Determine if this is a list or just a pair. It is a list if the second operand is a list or the empty list
       (cmp rbx ,type-empty-list)
       (je ,list)
-      (and rbx ,type-mask)
+      (and rbx ,result-type-mask)
       (cmp rbx ,type-list)
       (je ,list)
       (or rax ,type-pair);;Tag the pointer as a pair
@@ -629,7 +643,7 @@ type Variable =
     ,@(assert-pair-list)
     ;;Untag the address
     (mov rbx rax)
-    (and rbx ,type-mask)
+    (and rbx ,result-type-mask)
     (cmp rbx ,type-pair)
     (je ,untag-pair)
     (xor rax ,type-list)
@@ -648,7 +662,7 @@ type Variable =
     ,@(assert-pair-list)
     ;;Untag the address
     (mov rbx rax)
-    (and rbx ,type-mask)
+    (and rbx ,result-type-mask)
     (cmp rbx ,type-pair)
     (je ,untag-pair)
     (xor rax ,type-list)
@@ -1136,8 +1150,8 @@ type Variable =
       (mov r10 (offset rsp ,(- (add1 (length env)))))
       (mov r11 (offset rsp ,(- (+ 2 (length env)))))
 
-      (and r10 ,type-mask)
-      (and r11 ,type-mask)
+      (and r10 ,result-type-mask)
+      (and r11 ,result-type-mask)
       (cmp r10 r11)
       (jne ,false)
       
@@ -1159,12 +1173,9 @@ type Variable =
       (je ,list)
       (cmp r10 ,type-pair)
       (je ,pair)
-      (cmp r10 ,type-false)
+      (cmp r10 ,type-imm)
       (je ,simple)
-      (cmp r10 ,type-true)
-      (je ,simple)
-      (cmp r10 ,type-empty-list)
-      (je ,simple)
+      (jne err)
       
       ,bignum
       ;;Untag the pointers to the bignums since this is what compBignum expects
@@ -1344,35 +1355,35 @@ type Variable =
 ;;A variable that hods ASM for confirming that the value in rax is a bignum
 (define assert-bignum
   `((mov rbx rax)
-    (and rbx ,type-mask)
+    (and rbx ,result-type-mask)
     (cmp rbx ,type-bignum)
     (jne err)))
 
 ;;A variable that holds ASM for confirming that the value in rax is a list
 (define assert-list
   `((mov rbx rax)
-    (and rbx ,type-mask)
+    (and rbx ,result-type-mask)
     (cmp rbx ,type-list)
     (jne err)))
 
 ;;A variable that holds ASM for confirming that the value in rax is a box
 (define assert-box
   `((mov rbx rax)
-    (and rbx ,type-mask)
+    (and rbx ,result-type-mask)
     (cmp rbx ,type-box)
     (jne err)))
 
 ;;A variable that holds ASM for confirming that the value in rax is a pair
 (define assert-pair
   `((mov rbx rax)
-    (and rbx ,type-mask)
+    (and rbx ,result-type-mask)
     (cmp rbx ,type-pair)
     (jne err)))
 
 ;;A variable that holds ASM for confirming that the value in rax is a range
 (define assert-range
   `((mov rbx rax)
-    (and rbx ,type-mask)
+    (and rbx ,result-type-mask)
     (cmp rbx ,type-range)
     (jne err)))
     
@@ -1381,7 +1392,7 @@ type Variable =
 (define (assert-pair-list)
   (let ((end (gensym "end")))
     `((mov rbx rax)
-      (and rbx ,type-mask)
+      (and rbx ,result-type-mask)
       (cmp rbx ,type-pair)
       (je ,end)
       (cmp rbx ,type-list)

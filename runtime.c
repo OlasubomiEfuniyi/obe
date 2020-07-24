@@ -5,16 +5,21 @@
 #include <assert.h>
 #include <string.h>
 
-#define result_mask 0b111
 #define result_shift 3
-#define type_box 0b000
-#define type_bignum 0b001
-#define type_true 0b010
-#define type_false 0b011
-#define type_list  0b100
-#define type_pair 0b101
-#define type_range 0b110
-#define type_empty_list 0b111
+#define imm_shift (result_shift + 3)
+#define result_type_mask ((1 << result_shift) - 1)
+#define imm_type_mask ((1 << imm_shift) - 1)
+
+#define type_imm 0b000
+#define type_box 0b001
+#define type_bignum 0b010
+#define type_list  0b011
+#define type_pair 0b100
+#define type_range 0b101
+
+#define type_true ((0b000 << result_shift))
+#define type_false ((0b001 << result_shift))
+#define type_empty_list ((0b010 << result_shift))
 
 #define heap_size 8000000000
 
@@ -149,13 +154,13 @@ int64_t pairEqual(int64_t arg0, int64_t arg1) {
 		return -1;
 	} 
 
-	if(((((*(a0 + 1)) & result_mask) == type_pair) && 
-		(((*(a1 + 1)) & result_mask) != type_pair)) ||
-	   ((((*(a0 + 1)) & result_mask) != type_pair) && 
-		(((*(a1 + 1)) & result_mask) == type_pair))) {
+	if(((((*(a0 + 1)) & result_type_mask) == type_pair) && 
+		(((*(a1 + 1)) & result_type_mask) != type_pair)) ||
+	   ((((*(a0 + 1)) & result_type_mask) != type_pair) && 
+		(((*(a1 + 1)) & result_type_mask) == type_pair))) {
 		return -1;
-	} else if(((((*(a0 + 1)) & result_mask) != type_pair) && 
-		(((*(a1 + 1)) & result_mask) != type_pair))) { 
+	} else if(((((*(a0 + 1)) & result_type_mask) != type_pair) && 
+		(((*(a1 + 1)) & result_type_mask) != type_pair))) { 
 		return compValue(*(a0 + 1), *(a1 + 1));
 	} else {
 		return pairEqual(*(a0 + 1), *(a1 + 1));
@@ -173,7 +178,7 @@ void printResult(int64_t value) {
 void printValue(int64_t value) {
 	int64_t* addr;
 
-	switch(value & result_mask) {
+	switch(value & result_type_mask) {
 	case type_bignum:		
 		printBignum(value);	
 		break;
@@ -187,14 +192,20 @@ void printValue(int64_t value) {
 		printPair(value);
 		printf(")");
 		break;
-	case type_empty_list:
-		printf("()");
-		break;
-	case type_true:
-		printf("#t");
-		break;
-	case type_false:
-		printf("#f");
+	case type_imm:
+		switch(value) {
+			case type_empty_list:
+				printf("()");
+				break;
+			case type_true:
+				printf("#t");
+				break;
+			case type_false:
+				printf("#f");
+				break;
+			default:
+				error();	
+		}
 		break;
 	case type_range:
 		printf("(");
@@ -208,6 +219,8 @@ void printValue(int64_t value) {
 		printf("#&");
 		printValue(*((int64_t*)(value ^ type_box)));
 		break;
+	default:
+		error();
 	}
 
 }
@@ -218,16 +231,12 @@ void printList(int64_t value) {
 	if(*start_addr != type_empty_list) {
 		printValue(*start_addr);
 		value = *(start_addr + 1);
-		if ((value & result_mask) == type_list) {
+		if ((value & result_type_mask) == type_list) {
 			//Print a space if the next thing to print is not the empty list
-			if((*((int64_t* )(value ^ type_list)) & result_mask) != type_empty_list) {
+			if((*((int64_t* )(value ^ type_list)) & result_type_mask) != type_empty_list) {
 				printf(" ");
 			}
 			printList(value);
-		} else if((value & result_mask) == type_empty_list) {
-			//Do nothing
-		} else {
-
 		}
 	}
 }
@@ -241,10 +250,7 @@ void  printPair(int64_t value) {
 
 		//Check if the next value is another pair or the final value in
 		//a chain of pairs
-		if((value & result_mask) == type_empty_list) {
-			//Do nothing
-		}
-		else if((value & result_mask) == type_pair) {
+		if((value & result_type_mask) == type_pair) {
 			printf(" ");
 			printPair(value);
 		} else {
@@ -290,7 +296,7 @@ void rotateString(char* str) {
 
 /* Determine which comparison function to use based on the type of value to be compared */
 int64_t compValue(int64_t value1, int64_t value2) {
-	switch(value1 & result_mask) {
+	switch(value1 & result_type_mask) {
 		case type_bignum:
 			//untag pointers to bignum as expected by compBignum
 			return compBignum((value1 ^ type_bignum), (value2 ^ type_bignum));
@@ -298,14 +304,20 @@ int64_t compValue(int64_t value1, int64_t value2) {
 			return listEqual(value1, value2);
 		case type_pair:
 			return pairEqual(value1, value2);
-		case type_true:
-		case type_false:
-		case type_empty_list:
-			if(value1 == value2) {
-				return type_true;
-			} else {
-				return type_false;
-			}
+		case type_imm:
+		switch(value1) {
+			case type_empty_list:
+			case type_true:
+			case type_false:
+				if(value1 == value2) {
+					return type_true;
+				} else {
+					return type_false;
+				}
+			default:
+				runtimeSystemError();	
+		}
+		break;
 		default:
 			error();
 	}
