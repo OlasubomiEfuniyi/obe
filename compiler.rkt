@@ -15,7 +15,10 @@
 (define result-type-mask (sub1 (arithmetic-shift 1 result-shift)))
 ;;A mask to figure out what type of immediate value we have at hand.
 (define imm-type-mask (sub1 (arithmetic-shift 1 imm-shift)))
-  
+;;A value that can clear the tag to any pointer. It is useful when attempting to change the reference count
+;;of a chunk since knowing the type of the chunk is not necessary as they will all have their reference count
+;;as their first 8 bytes.
+(define clear-tag #xfffffffffffffff8)
 ;;These first 3 bits indicate a value is an immediate value. 
 (define type-imm #b000);
 ;;The remaining 7 possible combinations are used to indicate the type of different chunks on the heap
@@ -297,14 +300,32 @@ type Variable =
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile Box;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;Compile a box expression
+;;Expr CEnv -> ASM
 (define (compile-box e1 env)
-  `(
-    ,@(compile-e e1 env)
-    ,@(assert-heap-offset 0)
-    (mov (offset rdi 0) rax) ;;Place the value on the heap
-    (mov rax rdi) ;;Get the pointer to the boxed value
-    (or rax ,type-box) ;;Tag the value as type box
-    (add rdi 8)))
+  (let ((continue (gensym "continue")))
+    `(
+      ,@(compile-e e1 env)
+      ;;If the result of compiling e1 is a pointer to a chunk on the heap, this box now has a reference to the chunk
+      ;;which it will hold indefinitely. Therefore, the reference count of the chunk should be increased by 1.
+      ,@(increment-ref-count continue)
+
+      ,continue
+      ;;Initialize the reference count of the box to 0 since we do not know whether the box is being refernced by variable
+      ;;or larger expression
+      ,@(assert-heap-offset 0)
+      (mov rbx 0)
+      (mov (offset rdi 0) rbx)
+
+      ;;Place the value to be boxed on the heap
+      ,@(assert-heap-offset 1)
+      (mov (offset rdi 1) rax)
+
+      ;;Get the pointer to the box. The first 8 bytes of the box is its
+      ;;reference count, while its last 8 bytes is the boxed value
+      (mov rax rdi) 
+      (or rax ,type-box) ;;Tag the value as type box
+      (add rdi 16))))
 
 ;;Compile a box operation
 ;;BoxOp CEnv -> ASM
@@ -319,26 +340,47 @@ type Variable =
   `(
     ,@(compile-e e1 env)
     ,@assert-box
+    ;;Since unbox would only increase the reference count of the box by 1
+    ;;only to decrease it by 1 before it finishes, there is no need to
+    ;;perform reference count manipulation in unbox
     (xor rax ,type-box)
-    (mov rax (offset rax 0))))
+    (mov rax (offset rax 1))))
 
 (define (compile-set e1 e2 env)
-  `(
-    ;;Compile the box
-    ,@(compile-e e1 env)
-    ,@assert-box
-    (mov (offset rsp ,(- (add1 (length env)))) rax)
+  (let ((continue (gensym "continue"))
+        (post-decr (gensym "postDecrement")))
+    `(
+      ;;Compile the box
+      ,@(compile-e e1 env)
+      ,@assert-box
+      ;;Since set would only increase the reference count of the box by 1
+      ;;only to decrease it by 1 before it finishes, there is no need to
+      ;;perform reference count manipulation of the box in set
+      (mov (offset rsp ,(- (add1 (length env)))) rax)
 
-    ;;Compile the value
-    ,@(compile-e e2 (extend #f env))
-    (mov rbx rax)
-    
-    ;;Untag the pointer to the box and replace the value in the box
-    (mov rax (offset rsp ,(- (add1 (length env)))))
-    (xor rax ,type-box)
-    (mov (offset rax 0) rbx)
-    ;;Tag the pointer to the box again before returning it
-    (or rax ,type-box)))
+      ;;Compile the value
+      ,@(compile-e e2 (extend #f env))
+      ;;Increment the reference count of the value. This is important because the box
+      ;;where this value is to be placed will hold 1 more reference to it
+      ,@(increment-ref-count continue)
+
+      ,continue
+      (mov r15 rax) ;;save the new value to be placed in the box
+
+      ;;Decrement the reference count of the value that is to be replaced if it is a pointer to a chunk on the heap
+      ;;since the box will no longer hold a reference to it
+      (mov rax (offset rsp ,(- (add1 (length env)))))
+      (xor rax ,type-box)
+      (mov rax (offset rax 1))
+      ,@(decrement-ref-count post-decr)
+
+      ,post-decr
+      ;;Untag the pointer to the box and replace the value in the box
+      (mov rax (offset rsp ,(- (add1 (length env)))))
+      (xor rax ,type-box)
+      (mov (offset rax 1) r15)
+      ;;Tag the pointer to the box again before returning it
+      (or rax ,type-box))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile Loop;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Compile a loop expression
 ;;Loop CEnv -> ASM
@@ -1416,6 +1458,44 @@ type Variable =
     (cmp rbx (offset rsp -2)) ;;Compare the difference to the size of the heap
     (jge mem)))
     
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Reference counting ASM;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;A function that generates ASM for incrementing the reference count of the value
+;;in rax if it is a pointer to a chunk on the heap. continue should be a label
+;;to the point where the program should continue executing if the value in rax
+;;is not a reference to a chunk on the heap.
+;;rbx is overwritten
+;;r14 is overwritten
+;;Symbol -> ASM
+(define (increment-ref-count continue)
+  `(
+    (mov rbx rax)
+    (and rbx ,result-type-mask)
+    (cmp rbx ,type-imm)
+    (je ,continue) ;;We only want to increment the reference count if the value in rax is a pointer to a heap value
+    (and rax ,clear-tag)
+    (mov r14 (offset rax 0))
+    (add r14 1)
+    (mov (offset rax 0) r14)
+    (or rax rbx)));;Tag rax again
+
+;;A function that generate ASM for decrementing the reference count of the value
+;;in rax if it is a pointer to a chunk on the heap
+;;Symbol -> ASM
+(define (decrement-ref-count continue)
+  `(
+    (mov rbx rax) 
+    (and rbx ,result-type-mask)
+    (cmp rbx ,type-imm) ;;Check if the value is a pointer to a value on the heap
+    (je ,continue)
+    (and rax ,clear-tag) ;;The value is a pointer, decrement its reference count
+    (mov r14 (offset rax 0))
+    (sub r14 1)
+    (mov (offset rax 0) r14)
+    ;;Check if the reference count of the current object is 0. If so, free it recursively
+    ;;TODO
+    (or rax rbx))) ;;Tag rax as it was before
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Helper Functions;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Compile a list of expressions
