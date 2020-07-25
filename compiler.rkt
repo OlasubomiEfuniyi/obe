@@ -509,65 +509,64 @@ type Variable =
 ;;ListOf(Bindings) ListOf(Expr) CEnv -> ASM
 
 (define (compile-let bs exps env new-env)
-  (match bs
-    ;;Dealing with a simple binding of a value to a variable name
-    [(cons `(,(? symbol? x) ,expr) '()) ;;When we reach the last binding, no need to reserve space on the stack
-     `(;;Compile the head of the list of bindings. We do not want the expression
-       ;;to have a notion of the bindings that have been compiled as part of the
-       ;;current let, yet we want it to take the space they will fill up
-       ;;into account. So, we append enough #f values to block off the
-       ;;space required. This is also done in the similar cases below.
-       ,@(compile-e expr (append (make-list (length new-env) #f) env)) 
-       (mov (offset rsp ,(- (+ 1 (length env) (length new-env)))) rax) ;;Save the result on the stack
-       ,@(compile-let '() exps env (cons x new-env)) ;;Compile the rest of the list of bindings
-       )]
-    [(cons `(,(? symbol? x) ,expr) rest)
-     `(,@(compile-e expr (append (make-list (length new-env) #f) env)) ;;Compile the head of the list of bindings
-       (mov (offset rsp ,(- (+ 1 (length env) (length new-env)))) rax) ;;Save the result on the stack
-       ,@(compile-let rest exps env (cons x new-env)) ;;Compile the rest of the list of bindings
-       )]
-    [(cons `(,(? symbol? x1) ,(? symbol? x2) ,expr) '())
-     (let ((untag-pair (gensym "untag"))
-           (continue (gensym "continue")))
-     `(,@(compile-e expr (append (make-list (length new-env) #f) env))
-      ,@(assert-pair-list) ;;This binding syntax is only valid for pairs
-      (mov rbx rax)
-      (and rbx ,result-type-mask)
-      (cmp rbx ,type-pair)
-      (je ,untag-pair)
-      ;;If we reached here, assert-pair-list passed, so since it is not a pair, it must be a list
-      (xor rax ,type-list)
-      (jmp ,continue)
-      ,untag-pair
-      (xor rax ,type-pair) ;;Untag the value
-      ,continue
-      (mov rbx (offset rax 0))
-      (mov (offset rsp ,(- (+ 1 (length env) (length new-env)))) rbx) ;;Place the head value on the stack first
-      (mov rbx (offset rax 1))
-      (mov (offset rsp ,(- (+ 2 (length env) (length new-env)))) rbx) ;;Place the tail value on the stack
-      ,@(compile-let '() exps env (cons x2 (cons x1 new-env)))))] ;;Compile the rest of the list of bindings
-    [(cons `(,(? symbol? x1) ,(? symbol? x2) ,expr) rest)
-     (let ((untag-pair (gensym "untagPair"))
-           (continue (gensym "continue")))
-     `(,@(compile-e expr (append (make-list (length new-env) #f) env))
-      ,@(assert-pair-list) ;;This binding syntax is only valid for pairs
-      (mov rbx rax)
-      (and rbx ,result-type-mask)
-      (cmp rbx ,type-pair)
-      (je ,untag-pair)
-      (xor rax ,type-list)
-      (jmp ,continue)
-      ,untag-pair
-      (xor rax ,type-pair) ;;Untag the value
-      ,continue
-      (mov rbx (offset rax 0))
-      (mov (offset rsp ,(- (+ 1 (length env) (length new-env)))) rbx) ;;Place the head value on the stack first
-      (mov rbx (offset rax 1))
-      (mov (offset rsp ,(- (+ 2 (length env) (length new-env)))) rbx) ;;Place the tail value on the stack
-      ,@(compile-let rest exps env (cons x2 (cons x1 new-env)))))] ;;Compile the rest of the list of bindings
-    ['()
-     `(,@(compile-es exps (append new-env env)))] ;;Compile each expression that makes up the body of the let expression under the environment created by the bindings
-     ))
+  (let ((continue (gensym "continue")))
+    (match bs
+      ;;Dealing with a simple binding of a value to a variable name
+      [(cons `(,(? symbol? x) ,expr) rest) ;;When we reach the last binding, no need to reserve space on the stack
+       `(;;Compile the head of the list of bindings. We do not want the expression
+         ;;to have a notion of the bindings that have been compiled as part of the
+         ;;current let, yet we want it to take the space they will fill up
+         ;;into account. So, we append enough #f values to block off the
+         ;;space required. This is also done in the similar cases below.
+         ,@(compile-e expr (append (make-list (length new-env) #f) env))
+         ;;If rax is a pointer to a chunk on the heap, the chunk's reference count should now be
+         ;;bumped up by 1 since we have a new reference to it.
+         ,@(increment-ref-count continue)
+         ,continue
+         (mov (offset rsp ,(- (+ 1 (length env) (length new-env)))) rax) ;;Save the result on the stack
+         ,@(compile-let rest exps env (cons x new-env)) ;;Compile the rest of the list of bindings
+         )]
+      [(cons `(,(? symbol? x1) ,(? symbol? x2) ,expr) rest)
+       (let ((untag-pair (gensym "untag"))
+             (continue (gensym "continue"))
+             (post-incr-1 (gensym "postIncrement"))
+             (post-incr-2 (gensym "postIncrement")))
+         `(,@(compile-e expr (append (make-list (length new-env) #f) env))
+           ,@(assert-pair-list) ;;This binding syntax is only valid for pairs and lists
+           (mov rbx rax)
+           (and rbx ,result-type-mask)
+           (cmp rbx ,type-pair)
+           (je ,untag-pair)
+           ;;If we reached here, assert-pair-list passed, so since it is not a pair, it must be a list
+           (xor rax ,type-list)
+           (jmp ,continue)
+           ,untag-pair
+           (xor rax ,type-pair) ;;Untag the value
+           ,continue
+           ;;If the head value is a pointer to a chunk on the heap, the chunk's reference count should be incremented
+           ;;because a new reference to it is being created. Same goes for the tail value
+           (mov (offset rsp ,(- (+ 1 (length env) (length new-env)))) rax) ;;Save a pointer to the structure
+           (mov rax (offset rax 0))
+           ,@(increment-ref-count post-incr-1)
+           
+           ,post-incr-1
+           (mov rbx (offset rsp ,(- (+ 1 (length env) (length new-env)))))
+           (mov (offset rsp ,(- (+ 2 (length env) (length new-env)))) rbx) ;;Transfer the pointer to the structure before it is overwritten
+           (mov (offset rsp ,(- (+ 1 (length env) (length new-env)))) rax) ;;Place the head value on the stack first
+
+           (mov rax (offset rsp ,(- (+ 2 (length env) (length new-env))))) ;;Get the pointer to the structure
+           (mov rax (offset rax 1))
+           ,@(increment-ref-count post-incr-2)
+
+           ,post-incr-2
+           (mov (offset rsp ,(- (+ 2 (length env) (length new-env)))) rax) ;;Place the tail value on the stack
+           ,@(compile-let rest exps env (cons x2 (cons x1 new-env)))))] ;;Compile the rest of the list of bindings
+      ['()
+       `(
+         ,@(compile-es exps (append new-env env))
+         ;;Decrement the reference count of every chunk pointed to by a bound variable from this let
+         ;;TODO)] ;;Compile each expression that makes up the body of the let expression under the environment created by the bindings
+      )))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile Variable;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Compile a variable

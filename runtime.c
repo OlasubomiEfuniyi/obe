@@ -216,8 +216,10 @@ void printValue(int64_t value) {
 		printf(")");
 		break;
 	case type_box:
+		printf("Ref Count: %" PRId64 " Value: ", *((int64_t*)(value ^ type_box)));
 		printf("#&");
-		printValue(*((int64_t*)(value ^ type_box)));
+		printValue(*(((int64_t*)(value ^ type_box) + 1)));
+
 		break;
 	default:
 		error();
