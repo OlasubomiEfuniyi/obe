@@ -563,9 +563,9 @@ type Variable =
            ,@(compile-let rest exps env (cons x2 (cons x1 new-env)))))] ;;Compile the rest of the list of bindings
       ['()
        `(
-         ,@(compile-es exps (append new-env env))
+         ,@(compile-es-let exps (append new-env env))
          ;;Decrement the reference count of every chunk pointed to by a bound variable from this let
-         ;;TODO)] ;;Compile each expression that makes up the body of the let expression under the environment created by the bindings
+         ,@(decrement-ref-counts-in-let new-env (append new-env env)))] ;;Compile each expression that makes up the body of the let expression under the environment created by the bindings
       )))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile Variable;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1496,6 +1496,20 @@ type Variable =
     ;;TODO
     (or rax rbx))) ;;Tag rax as it was before
 
+;;A function that generates ASM for decrementing the reference count of each chunk on the heap
+;;pointed to by variables in the provided environment
+;;CEnv CEnv -> ASM
+(define (decrement-ref-counts-in-let new-env collective-env)
+  (match new-env
+    ['() `()]
+    [(cons (? symbol? x) new-env)
+     (let ((continue (gensym "continue")))
+       `(
+         (mov rax (offset rsp ,(- (add1 (lookup x collective-env)))))
+         ,@(decrement-ref-count continue)
+         ,continue
+         ,@(decrement-ref-counts-in-let new-env collective-env)))]
+    [_ (error "Invalid new environment")]))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Helper Functions;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Compile a list of expressions
 ;;Listof(Expr) CEnv -> ASM
@@ -1506,6 +1520,24 @@ type Variable =
      `(,@(compile-e e env)
        (mov (offset rsp ,(- (add1 (length env)))) rax) ;;Save the value on the top of the stack 
        ,@(compile-es es (extend #f env))
+       )]))
+
+;;Compile a list of expressions for a let binding
+;;Listof(Expr) CEnv -> ASM
+(define (compile-es-let es env)
+  (match es
+    ['() '()]
+    [(cons e '())
+     ;;Since the return value of the let will be referenced by the larger expression it is contained within, the reference count should be incremented by 1
+     (let ((continue (gensym "continue")))
+       `(,@(compile-e e env)
+         ,@(increment-ref-count continue)
+         ,continue
+         (mov (offset rsp ,(- (add1 (length env)))) rax)))] ;;Save the value on the top of the stack 
+    [(cons e es)
+     `(,@(compile-e e env)
+       (mov (offset rsp ,(- (add1 (length env)))) rax) ;;Save the value on the top of the stack 
+       ,@(compile-es-let es (extend #f env))
        )]))
 
 ;;Compile a list of characters by placing each of them on the heap one byte at a time
