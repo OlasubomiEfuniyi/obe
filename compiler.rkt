@@ -348,7 +348,8 @@ type Variable =
 
 (define (compile-set e1 e2 env)
   (let ((continue (gensym "continue"))
-        (post-decr (gensym "postDecrement")))
+        (post-decr (gensym "postDecrement"))
+        (stack-size (* 8 (+ 1 (length env)))))
     `(
       ;;Compile the box
       ,@(compile-e e1 env)
@@ -372,7 +373,7 @@ type Variable =
       (mov rax (offset rsp ,(- (add1 (length env)))))
       (xor rax ,type-box)
       (mov rax (offset rax 1))
-      ,@(decrement-ref-count post-decr)
+      ,@(decrement-ref-count post-decr stack-size)
 
       ,post-decr
       ;;Untag the pointer to the box and replace the value in the box
@@ -562,10 +563,16 @@ type Variable =
            (mov (offset rsp ,(- (+ 2 (length env) (length new-env)))) rax) ;;Place the tail value on the stack
            ,@(compile-let rest exps env (cons x2 (cons x1 new-env)))))] ;;Compile the rest of the list of bindings
       ['()
-       `(
-         ,@(compile-es-let exps (append new-env env))
-         ;;Decrement the reference count of every chunk pointed to by a bound variable from this let
-         ,@(decrement-ref-counts-in-let new-env (append new-env env)))] ;;Compile each expression that makes up the body of the let expression under the environment created by the bindings
+       (let* ((l-env (length env))
+             (l-new-env (length new-env))
+             (len (+ l-env l-new-env))
+             (stack-size (* 8 (+ 1 l-env l-new-env))))
+         `(
+           ,@(compile-es-let exps (append new-env env))
+           (mov (offset rsp ,(- (+ 1 len))) rax) ;;Save the return value of the let expression
+           ;;Decrement the reference count of every chunk pointed to by a bound variable from this let
+           ,@(decrement-ref-counts-in-let new-env (append new-env env) stack-size)
+           (mov rax (offset rsp ,(- (+ 1 len))))))] ;;Compile each expression that makes up the body of the let expression under the environment created by the bindings
       )))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile Variable;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1481,8 +1488,8 @@ type Variable =
 
 ;;A function that generate ASM for decrementing the reference count of the value
 ;;in rax if it is a pointer to a chunk on the heap
-;;Symbol -> ASM
-(define (decrement-ref-count continue)
+;;Symbol Integer -> ASM
+(define (decrement-ref-count continue stack-size)
   `(
     (mov rbx rax) 
     (and rbx ,result-type-mask)
@@ -1492,24 +1499,51 @@ type Variable =
     (mov r14 (offset rax 0))
     (sub r14 1)
     (mov (offset rax 0) r14)
-    ;;Check if the reference count of the current object is 0. If so, free it recursively
-    ;;TODO
-    (or rax rbx))) ;;Tag rax as it was before
+    (or rax rbx)
+    ;;Possibly garbage collect the chunk
+    ,@(garbage-collect continue stack-size)
+    )) ;;Tag rax as it was before
 
 ;;A function that generates ASM for decrementing the reference count of each chunk on the heap
 ;;pointed to by variables in the provided environment
-;;CEnv CEnv -> ASM
-(define (decrement-ref-counts-in-let new-env collective-env)
+;;CEnv CEnv Integer -> ASM
+(define (decrement-ref-counts-in-let new-env collective-env stack-size)
   (match new-env
     ['() `()]
     [(cons (? symbol? x) new-env)
      (let ((continue (gensym "continue")))
        `(
          (mov rax (offset rsp ,(- (add1 (lookup x collective-env)))))
-         ,@(decrement-ref-count continue)
+         ,@(decrement-ref-count continue stack-size)
          ,continue
-         ,@(decrement-ref-counts-in-let new-env collective-env)))]
+         ,@(decrement-ref-counts-in-let new-env collective-env stack-size)))]
     [_ (error "Invalid new environment")]))
+
+;;A function that generates ASM for possibly garbage collecting a chunk on the heap if its
+;;reference count is 0. The supposed pointer to the chunk is expected to be in rax.
+;;Symbol Integer -> ASM
+(define (garbage-collect continue stack-size)
+  `(
+    (mov rbx rax) 
+    (and rbx ,result-type-mask)
+    (cmp rbx ,type-imm) ;;Check if the value is a pointer to a value on the heap
+    (je ,continue)
+    (and rax ,clear-tag) ;;The value is a pointer, check its reference count
+    (mov r14 (offset rax 0))
+    (cmp r14 0)
+    (jg ,continue)
+    ;;Perform Garbage collection
+    (or rax rbx) ;;tag rax again
+    (mov r14 rdi)
+    (mov (offset rsp ,(- (add1 (/ stack-size 8))))  rax)
+    (mov rdi rax)
+    (sub rsp ,(+ 8 stack-size))
+    (call garbageCollect)
+    (add rsp ,(+ 8 stack-size))
+    (mov rdi r14)
+    (mov rax (offset rsp ,(- (add1 (/ stack-size 8)))))
+    (jmp ,continue)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Helper Functions;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Compile a list of expressions
 ;;Listof(Expr) CEnv -> ASM
@@ -1528,16 +1562,20 @@ type Variable =
   (match es
     ['() '()]
     [(cons e '())
-     ;;Since the return value of the let will be referenced by the larger expression it is contained within, the reference count should be incremented by 1
-     (let ((continue (gensym "continue")))
-       `(,@(compile-e e env)
-         ,@(increment-ref-count continue)
-         ,continue
-         (mov (offset rsp ,(- (add1 (length env)))) rax)))] ;;Save the value on the top of the stack 
+     ;;We ignore the fact that this expression may produce a fresh pointer to a chunk on the heap that is not already referenced, and we know will not be
+     ;;reference by us because it is going to be our return value. Therefore, it is up to the larger expression to decide if a reference to it will be
+     ;;kept, if it will be garbage collected, or if it will just pass the buck like we are doing now.
+     `(,@(compile-e e env))] ;;Save the value on the top of the stack 
     [(cons e es)
-     `(,@(compile-e e env)
-       (mov (offset rsp ,(- (add1 (length env)))) rax) ;;Save the value on the top of the stack 
-       ,@(compile-es-let es (extend #f env))
+     (let ((continue (gensym "continue"))
+           (stack-size (* 8 (length env))))
+       `(,@(compile-e e env)
+         ;;If the result of evaluating this expression (which is not the last expression in the body of the let) is a pointer to the heap,
+         ;;then it should be garbage collected if its reference count is 0. This cases is useful for chunks that are created by an expression
+         ;;in the body of the let binding but are never referenced. 
+         ,@(garbage-collect continue stack-size)
+         ,continue
+         ,@(compile-es-let es env))
        )]))
 
 ;;Compile a list of characters by placing each of them on the heap one byte at a time
