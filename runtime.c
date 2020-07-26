@@ -325,6 +325,12 @@ int64_t compValue(int64_t value1, int64_t value2) {
 	}
 }
 
+void garbageCollect(int64_t ref) {
+	printf("About to garbage collect ");
+	printValue(ref);
+	printf("\n");
+}
+
 /* Signal an error while executing the program */
 int error() {
 	printf("err\n");
