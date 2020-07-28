@@ -1540,7 +1540,7 @@ type Variable =
            (dec-gc (gensym "decGC")))
        `(
          (mov rax (offset rsp ,(- (add1 (lookup x collective-env)))))
-         (mov rbx (offset rsp ,(- (+ (/ stack-size 8) (length collective-env))))) ;;Get the return value of the let expression
+         (mov rbx (offset rsp ,(- (+ (/ stack-size 8))))) ;;Get the return value of the let expression
          (cmp rbx rax) ;;Check if this let bound value is the same as the return value
          (jne ,dec-gc)
          ,@(decrement-ref-count continue stack-size #f) ;;Do not attempt to garbage collect
