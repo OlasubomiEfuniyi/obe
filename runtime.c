@@ -105,9 +105,19 @@ int64_t compileBignum(int64_t bn_str_ptr, int64_t bn_struct_ptr) {
 
 	mpz_init(bn);
 	mpz_set_ui(bn, 0);
-	
+
+	//Copy the string representation of the bignum into a seperate buffer
+	int len = (int) strlen((char*)bn_str_ptr); 
+	char* str = malloc(len + 1);
+
+	if(str == NULL) {
+		runtimeSystemError();
+	}
+
+	strncpy(str, (char*)bn_str_ptr, len + 1);
+ 	
 	//Use the string value of the bignum to setup the GMP struct
-	flag = mpz_set_str(bn, (char *)bn_str_ptr, 10);
+	flag = mpz_set_str(bn, str, 10);
 	if(flag != 0) {
 		runtimeSystemError();
 	}
@@ -266,9 +276,12 @@ void  printPair(int64_t value) {
 /* Given a pointer to a gmp struct, print the bignum it represents */
 void printBignum(int64_t value) {
 	//Clear the tagging to get the address
-	mpz_t* result = (mpz_t*)(value ^ type_bignum);
- 	
-	mpz_out_str(stdout,10,*result);
+	int64_t* result = (int64_t*)(value ^ type_bignum);
+ 
+	printf("Ref Count: %" PRId64 " Value: ", *result);
+	mpz_t* gmp = (mpz_t*)(result + 1);
+	
+	mpz_out_str(stdout,10,*gmp);
 }
 
 

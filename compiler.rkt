@@ -892,10 +892,9 @@ type Variable =
          (num-string-padded (string-append num-string padding))
          ;;Using the padded num-string ensures that rdi remains at an 8 byte boundary
          (num-list (string->list num-string-padded))
-         (stack-size (* 8 (+ 2 (length env)))))
+         (stack-size (* 8 (+ 3 (length env)))))
     `(
-      ;;Save the pointer to the beginning of the list
-      (mov rax rdi)
+      (mov (offset rsp ,(- (add1 (length env)))) rdi) ;;Save a pointer to the beginning of the string representation of the bignum
       ;;Compile the list of characters representing the number. Each character will take up one byte
       ;;The first byte will containt the length of the list of characters
       ,@(compile-char-list num-list)
@@ -910,22 +909,36 @@ type Variable =
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Call the C function to compile a bignum into a GMP struct;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       ;;Save the values in the registers used to pass arguments. At this point, the last thing placed on the heap is the string representation of the
       ;;bignum
-      (mov (offset rsp ,(- (add1 (length env)))) rdi)
-      (mov (offset rsp ,(- (+ 2 (length env)))) rsi)
+      (mov (offset rsp ,(- (+ 2 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 3 (length env)))) rsi)
 
       ;;Make sure that the addreses to be occupied by the GMP struct are within the heap's bounds
-      ,@(assert-heap-offset 0)
-      ,@(assert-heap-offset 1)
+      ;;If the string representation of the bignum successfully took up 24 bytes or more, then we definitely
+      ;;have enough space since the GMP struct and the reference count only need 24 bytes of space.
+      ;;Otherwise, It must have either taken up 8 bytes of space or 16 bytes of space. If it took up
+      ;;8 bytes of space, then we are sure of the first 8 bytes for the reference count. We still need
+      ;;to confirm that the remaining 16 bytes is available. If it took up 16 bytes of space, then we
+      ;;are sure of the first 8 bytes for the reference count and the first 8 bytes of the GMP struct. We
+      ;;need to confirm that the last 8 bytes for the GMP struct is available.
+      ,@(if (> len 16)
+            ;;Then the padded string must be 24 bytes or more
+            `()
+            (if (> len 8)
+                ;;Then the padded string is 16 bytes
+                (assert-heap-offset 0)
+
+                ;;Then the string is 8 bytes
+                `(,@(assert-heap-offset 0)
+                  ,@(assert-heap-offset 1))))
       
       ;;Store arguments in the registers used to pass arguments to the function
-      (mov rdi rax);;Pointer to the begining of the string rep of the bignum
-      (mov rsi rdi);;Pointer to the next available space on the heap where the GPM struct will go.
+      (mov rdi (offset rsp ,(- (add1 (length env))))) ;;Pointer to the begining of the string rep of the bignum
+      (mov rsi (offset rsp ,(- (add1 (length env)))));;Pointer to the next available space on the heap where the GPM struct will go.
                    ;;This is intentionally the same as the beginning of the string because once
                    ;;we have read from it, we no longer need it and can overwrite its values. We
                    ;;just have to make sure that the reading takes place before writing.
-
-      (mov r15 rsi);;Save a copy of the address of the struct in r15
-
+      (add rsi 8) ;;Skip 8 bytes to leave space for the reference count
+      
       ;;Setup the stack for the call
       (sub rsp ,stack-size)
       (call compileBignum)
@@ -934,15 +947,22 @@ type Variable =
       ;;Restore the stack after the call
       (add rsp ,stack-size)
 
+      ;;Set the reference count ot 0. Cannot do this before compiling the bignum because it will overwrite the string
+      (mov rdi (offset rsp ,(- (add1 (length env)))))
+      (mov rbx 0)
+      (mov (offset rdi 0) rbx)
+      
       ;;Restore the registers that were used to pass arguments
-      (mov rdi r15) ;;rdi has now been reset to its position before the string representation of the num was placed on the heap
-      (mov rsi (offset rsp ,(- (+ 2 (length env)))))
+      (mov rdi (offset rsp ,(- (+ 1 (length env))))) ;;rdi has now been reset to its position before the string representation of the num was placed on the heap
+      (mov rsi (offset rsp ,(- (+ 3 (length env)))))
 
+      ;;Skip the reference count
+      (add rdi 8)
       ;;make rdi point to the next avialable position on the heap by skipping the GMP struct
       (add rdi rax)
       
       ;;Tag the result as a gmp_struct
-      (mov rax r15)
+      (mov rax (offset rsp ,(- (+ 1 (length env)))))
       (or rax ,type-bignum))))
 
 
