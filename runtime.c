@@ -68,14 +68,12 @@ void my_mpz_add(int64_t rop, int64_t op1, int64_t op2) {
 	assert(op1 % 8 == 0);
 	assert(op2 % 8 == 0);	
 
-	mpz_add(*((mpz_t *)rop), *((mpz_t*)op1), *((mpz_t*)op2));
+	mpz_add(*((mpz_t *)rop), *((mpz_t*)(((int64_t*)op1) + 1)), *((mpz_t*)(((int64_t *)op2) + 1)));
 }
 
 /* Increment the untagged pointer to a bignum, storing the result in res */
 void increment(int64_t arg, int64_t res) {
 	mpz_add_ui(*((mpz_t*)res), *((mpz_t*)(((int64_t *) arg) + 1)), 1);
-	//printBignum(arg);
-	//printf("Bye from increment\n");
 }
 
 void my_mpz_sub(int64_t rop, int64_t op1, int64_t op2) {
@@ -83,12 +81,13 @@ void my_mpz_sub(int64_t rop, int64_t op1, int64_t op2) {
 	assert(op1 % 8 == 0);
 	assert(op2 % 8 == 0);	
 
-	mpz_sub(*((mpz_t *)rop), *((mpz_t*)op1), *((mpz_t*)op2));
+	mpz_sub(*((mpz_t *)rop), *((mpz_t*)(((int64_t *)op1) + 1)), *((mpz_t*)(((int64_t *)op2) + 1)));
 }
 
 /* Decrement the untagged pointer to a bignum, placing the result in res*/
 void decrement(int64_t arg, int64_t res) {
-	mpz_sub_ui(*((mpz_t*)res), *((mpz_t*)arg), 1);
+	int64_t* argument = (int64_t* )arg;
+	mpz_sub_ui(*((mpz_t*)res), *((mpz_t*)(argument + 1)), 1);
 }
 /** Compile a bignum into a GMP structure pointer.
     bn_str_ptr is a pointer to the string representation of the bignum.
@@ -130,8 +129,10 @@ int64_t compileBignum(int64_t bn_str_ptr, int64_t bn_struct_ptr) {
 /* Compare two bignums  */
 int64_t compBignum(int64_t arg0, int64_t arg1) {
 	/* Return the result of comparing the two bignums using the mpz_cmp function from the GMP library */	
-	int comp_res =  mpz_cmp(*((mpz_t*)arg0), *((mpz_t*)arg1));
+	int64_t* argument0 = (int64_t *)arg0;
+	int64_t* argument1 = (int64_t *)arg1;
 
+	int comp_res =  mpz_cmp(*((mpz_t*)(argument0 + 1)), *((mpz_t*)(argument1 + 1)));
 	return comp_res;
 }
 
@@ -224,6 +225,8 @@ void printValue(int64_t value) {
 		printBignum(*addr);
 		printf("..=");
 		printBignum(*(addr + 1));
+		printf(";");
+		printBignum(*(addr + 2));
 		printf(")");
 		break;
 	case type_box:

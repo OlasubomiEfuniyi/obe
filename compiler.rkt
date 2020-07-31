@@ -810,25 +810,30 @@ type Variable =
       (mov rax (offset rsp ,(- (+ 2 (length env)))))
       ,@(decrement-ref-count continue4 stack-size #t)
       ,continue4
+      
       ;;Create the range on the heap and return a pointer to it. 
       ;;Place the beginning of the range on the heap
+      ,@(assert-heap-offset 0)
+      (mov rbx 0)
+      (mov (offset rdi 0) rbx) ;;Set the reference count of this range to 0
+      
       (mov rax (offset rsp ,(- (add1 (length env)))))
       (or rax ,type-bignum)
-      ,@(assert-heap-offset 0)
-      (mov (offset rdi 0) rax)
+      ,@(assert-heap-offset 1)
+      (mov (offset rdi 1) rax)
       
       (mov rax (offset rsp ,(- (+ 4 (length env))))) ;;Get the pointer to the decremented bignum
       (or rax ,type-bignum) ;;Tag the bignum
       ,@(increment-ref-count continue5)
       ,continue5
-      ,@(assert-heap-offset 1)
-      (mov (offset rdi 1) rax)
+      ,@(assert-heap-offset 2)
+      (mov (offset rdi 2) rax)
 
       ;;Place the step value after the start and end value on the heap
       (mov rax (offset rsp ,(- (+ 3 (length env)))))
       (or rax ,type-bignum)
-      ,@(assert-heap-offset 2)
-      (mov (offset rdi 2) rax)
+      ,@(assert-heap-offset 3)
+      (mov (offset rdi 3) rax)
 
       (mov rax rdi)
       (or rax ,type-range)
@@ -842,19 +847,31 @@ type Variable =
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
         (c3 (compile-e e3 (extend #f (extend #f env))))
-        (stack-size (* 8 (+ 5 (length env)))))
+        (stack-size (* 8 (+ 5 (length env))))
+        (continue1 (gensym "continue"))
+        (continue2 (gensym "continue"))
+        (continue3 (gensym "continue")))
     `(,@c1
       ,@assert-bignum
+      ;;This range will have a reference to the bignum representing the start of the range
+      ,@(increment-ref-count continue1)
+      ,continue1
       (xor rax ,type-bignum) ;;Untag the pointer to the bignum
       (mov (offset rsp ,(- (add1 (length env)))) rax) ;;save the starting point of the range on the stack
 
       ,@c2
       ,@assert-bignum
+      ;;This range will have a reference to the bignum representing the end of the range
+      ,@(increment-ref-count continue2)
+      ,continue2
       (xor rax ,type-bignum) ;;Untag the pointer to the bignum
       (mov (offset rsp ,(- (+ 2 (length env)))) rax) ;;save the ending point of the range on the stack
 
       ,@c3
       ,@assert-bignum
+      ;;This range will have a reference to the bignum representing the step value of the range
+      ,@(increment-ref-count continue3)
+      ,continue3
       (xor rax ,type-bignum) ;;Untag the pointer to the bignum
       (mov (offset rsp ,(- (+ 3 (length env)))) rax) ;;save the step value of the range on the stack
       
@@ -880,23 +897,29 @@ type Variable =
       (jg err) ;;If the return value is greater than or equal to 0, starting point is greater than or equal to ending point
 
 
-      ;;Create the range on the heap and return a pointer to it. Each pointer to a gmp struct is 8 bytes, keepind rdi a multiple of 8
-      (mov rax (offset rsp ,(- (add1 (length env)))))
-      (or rax ,type-bignum)
+      ;;Create the range on the heap and return a pointer to it. Each pointer to a gmp struct is 16 bytes, keepind rdi a multiple of 8
       ,@(assert-heap-offset 0)
-      (mov (offset rdi 0) rax)
-      (mov rax (offset rsp ,(- (+ 2 (length env)))))
+      (mov rbx 0)
+      (mov (offset rdi 0) rbx);; Initialize the reference count of this range to 0
+      
+      (mov rax (offset rsp ,(- (add1 (length env)))))
       (or rax ,type-bignum)
       ,@(assert-heap-offset 1)
       (mov (offset rdi 1) rax)
-      (mov rax (offset rsp ,(- (+ 3 (length env)))))
+      
+      (mov rax (offset rsp ,(- (+ 2 (length env)))))
       (or rax ,type-bignum)
       ,@(assert-heap-offset 2)
       (mov (offset rdi 2) rax)
+      
+      (mov rax (offset rsp ,(- (+ 3 (length env)))))
+      (or rax ,type-bignum)
+      ,@(assert-heap-offset 3)
+      (mov (offset rdi 3) rax)
 
       (mov rax rdi)
       (or rax ,type-range)
-      (add rdi 24)))) ;;Make rdi point to the next free position on the heap
+      (add rdi 32)))) ;;Make rdi point to the next free position on the heap
        
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile Boolean;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
