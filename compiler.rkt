@@ -729,19 +729,34 @@ type Variable =
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
         (c3 (compile-e e3 (extend #f (extend #f env))))
-        (stack-size (* 8 (+ 5 (length env)))))
+        (stack-size (* 8 (+ 5 (length env))))
+        (continue1 (gensym "continue"))
+        (continue2 (gensym "continue"))
+        (continue3 (gensym "continue"))
+        (continue4 (gensym "continue"))
+        (continue5 (gensym "continue")))
     `(,@c1
       ,@assert-bignum
+      ;;This range will have a reference to the bignum that inidicates the start of the range
+      ,@(increment-ref-count continue1)
+      ,continue1
       (xor rax ,type-bignum) ;;Untag the pointer to the bignum
       (mov (offset rsp ,(- (add1 (length env)))) rax) ;;save the starting point of the range on the stack
 
       ,@c2
       ,@assert-bignum
+      ;;This range will not have a reference to this bignum but rather to its decremented value. However we want
+      ;;to increment its reference count so that right after decrementing, we can decrement the reference count.
+      ;;If the reference count falls to 0 in the process, the bignum can then be garbage collected
+      ,@(increment-ref-count continue2)
+      ,continue2
       (xor rax ,type-bignum) ;;Untag the pointer to the bignum
       (mov (offset rsp ,(- (+ 2 (length env)))) rax) ;;save the ending point of the range on the stack
 
       ,@c3
       ,@assert-bignum
+      ,@(increment-ref-count continue3)
+      ,continue3
       (xor rax ,type-bignum) ;;Untag the pointer to the bignum
       (mov (offset rsp ,(- (+ 3 (length env)))) rax) ;;save the step value on the stack
       
@@ -752,7 +767,7 @@ type Variable =
       (mov (offset rsp ,(- (+ 5 (length env)))) rsi)
 
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;pass the starting point of the range in rdi
-      (mov rsi (offset rsp ,(- (+ 2 (length env))))) ;;pass the ending point of the range in rdi
+      (mov rsi (offset rsp ,(- (+ 2 (length env))))) ;;pass the ending point of the range in rsi
 
       (sub rsp ,stack-size)
       (call compBignum)
@@ -768,15 +783,20 @@ type Variable =
       
       ;;;;;;;;;;;;;;;;;Decrement the end of the range before placing it on the heap;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       (mov rax (offset rsp ,(- (+ 2 (length env)))))
-
+      
       ;;Prep for/call decrement
       (mov (offset rsp ,(- (+ 4 (length env)))) rdi)
       (mov (offset rsp ,(- (+ 5 (length env)))) rsi)
-      ;;Make sure the space that will be used to store the GMP struct is within the bounds of the heap
+      ;;Make sure the space that will be used to store the reference count and GMP struct is within the bounds of the heap
       ,@(assert-heap-offset 0)
       ,@(assert-heap-offset 1)
+      ,@(assert-heap-offset 2)
       (mov rdi rax)
       (mov rsi (offset rsp ,(- (+ 4 (length env)))))
+      ;;Set the reference count of the new bignum to be made to 0
+      (mov rbx 0)
+      (mov (offset rsi 0) rbx)
+      (add rsi 8)
       (sub rsp ,stack-size)
       (call decrement)
 
@@ -784,8 +804,12 @@ type Variable =
       (mov rdi (offset rsp ,(- (+ 4 (length env))))) ;;Restore rdi
       (mov rsi (offset rsp ,(- (+ 5 (length env))))) ;;Restore rsi
 
-      (add rdi 16) ;;Skip over the gmp struct for the decremented value on the heap
-      
+      (add rdi 24) ;;Skip over the reference count and gmp struct for the decremented value on the heap
+
+      ;;Decrement the reference count of the initial ending bignum, possibly garbage collecting it
+      (mov rax (offset rsp ,(- (+ 2 (length env)))))
+      ,@(decrement-ref-count continue4 stack-size #t)
+      ,continue4
       ;;Create the range on the heap and return a pointer to it. 
       ;;Place the beginning of the range on the heap
       (mov rax (offset rsp ,(- (add1 (length env)))))
@@ -795,6 +819,8 @@ type Variable =
       
       (mov rax (offset rsp ,(- (+ 4 (length env))))) ;;Get the pointer to the decremented bignum
       (or rax ,type-bignum) ;;Tag the bignum
+      ,@(increment-ref-count continue5)
+      ,continue5
       ,@(assert-heap-offset 1)
       (mov (offset rdi 1) rax)
 
@@ -806,7 +832,7 @@ type Variable =
 
       (mov rax rdi)
       (or rax ,type-range)
-      (add rdi 24) ;;Make rdi point to the next free position on the heap
+      (add rdi 32) ;;Make rdi point to the next free position on the heap
       ,@assert-heap))) 
       
 

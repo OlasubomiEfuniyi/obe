@@ -73,7 +73,7 @@ void my_mpz_add(int64_t rop, int64_t op1, int64_t op2) {
 
 /* Increment the untagged pointer to a bignum, storing the result in res */
 void increment(int64_t arg, int64_t res) {
-	mpz_add_ui(*((mpz_t*)res), *((mpz_t*)arg), 1);
+	mpz_add_ui(*((mpz_t*)res), *((mpz_t*)(((int64_t *) arg) + 1)), 1);
 	//printBignum(arg);
 	//printf("Bye from increment\n");
 }
@@ -105,7 +105,7 @@ int64_t compileBignum(int64_t bn_str_ptr, int64_t bn_struct_ptr) {
 
 	mpz_init(bn);
 	mpz_set_ui(bn, 0);
-
+//
 	//Copy the string representation of the bignum into a seperate buffer
 	int len = (int) strlen((char*)bn_str_ptr); 
 	char* str = malloc(len + 1);
@@ -218,8 +218,9 @@ void printValue(int64_t value) {
 		}
 		break;
 	case type_range:
+		printf("Ref Count: %" PRId64 " Value: ", *((int64_t *)(value ^ type_range)));
 		printf("(");
-		addr = (int64_t *) (value ^ type_range);
+		addr = ((int64_t *) (value ^ type_range)) + 1;
 		printBignum(*addr);
 		printf("..=");
 		printBignum(*(addr + 1));
