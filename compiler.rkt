@@ -393,21 +393,44 @@ type Variable =
 ;;Variable Expr ListOf(Expr) CEnv -> ASM
 (define (compile-for v e-rng exprs env)
   (let ((c-rng (compile-e e-rng env))
-        ;;reserve four spots on the stack where the beginning of the range, end of the range, rdi and rsi will reside.
-        (c-exprs (compile-es exprs (extend #f (extend #f (extend #f (extend v env))))))
+        ;;reserve five spots on the stack where the beginning of the range, end of the range, rdi, rsi and range will reside.
+        (c-exprs (compile-es exprs (extend #f (extend #f (extend #f (extend #f (extend v env)))))))
         (end (gensym "end"))
         (loop (gensym "loop"))
-        (stack-size (* 8 (+ 4 (length env)))))
+        (stack-size (* 8 (+ 5 (length env))))
+        (continue1 (gensym "continue"))
+        (continue2 (gensym "continue"))
+        (continue3 (gensym "continue"))
+        (continue4 (gensym "continue")))
 
     `(,@c-rng ;;Compile the range
-      
+      ;;This for loop will hold a reference count to the range during its execution. It will lose the reference when it is done.
+      ;;I increment and then decrement the reference count because in a case where the range expression was only created to be used by the for loop, the decrement
+      ;;step, in undoing the increment will also cause a garbage collection of the range. However, it is possible that the for loop is referencing an already exisiting
+      ;;range.
+      ;;NOTE: The for loop cannot pass along a reference to the range. It can however pass along a reference to the beginning of the range
+      ;;or any of the successive bignums created while iterating over the range.
+      ,@(increment-ref-count continue1)
+      ,continue1
       ,@assert-range
+      (mov (offset rsp ,(- (+ 5 (length env)))) rax) ;;Save a tagged reference to the range so that the reference count can be decremented at the end of the for loop
       
-      (xor rax ,type-range) ;;Untag the pointer to the range
+      (xor rax ,type-range) ;;Untag the pointer to the range for the work to be done
       
       ;;;;;;;;;;;;;;;Loop over the range, making v represent each successive value in the range;;;;;;;;;;;;;;;;;;;;;;;
-      (mov rbx (offset rax 0)) ;;Move the beginning of the range into rbx
-      (mov rax (offset rax 1)) ;;Move the end of the range into rax.
+      ;;v will represent each successive value in the range because we place each successive value on the stack where a lookup
+      ;;for v will find it.
+
+      ;;NOTE: The for loop temporarily holds a reference to the beginning of the range before incrementing. The reference count is only incremented
+      ;;to maintian the pattern of incrementing the reference count of whatever v points to and decrementing it before v takes on a new value.
+      ;;NOTE: The for loop never holds a reference to the end of the range in v. It uses it for comparisons though. Since the range still holds
+      ;;a reference to it, there is no risk of having the end of the range garbage collected from underneath the for loop.
+      (mov r15 rax) ;;r15 now holds an untagged reference to the range chunk
+      (mov rax (offset r15 1)) ;;rax now holds the beginning of the range
+      ,@(increment-ref-count continue3)
+      ,continue3
+      (mov rbx (offset r15 1)) ;;Move the beginning of the range into rbx
+      (mov rax (offset r15 2)) ;;Move the end of the range into rax.
 
       ;;Always make sure that the current value of v is at offset 1 from the top of the stack and
       ;;the end of the range is at offset 2 at the top of the stack.
@@ -416,35 +439,57 @@ type Variable =
       (mov (offset rsp ,(- (+ 2 (length env)))) rax)
       (mov (offset rsp ,(- (+ 3 (length env)))) rdi)
       (mov (offset rsp ,(- (+ 4 (length env)))) rsi)
-      
+
+      ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Iterate;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       ,loop
-     
-      ,@c-exprs ;;Execute the expressions
+      
+      ,@c-exprs ;;Execute the body of the loop
       (mov (offset rsp ,(- (+ 3 (length env)))) rdi) ;;The body of the loop may have updated rdi
       
       ;;Increment the bignum in rbx and compare it with the bignum in rax to determine when to stop
+
+      ;;Make sure that there is space on the heap for the reference count and the GMP struct that make up the bignum.
+      ;;At this point, rdi points to the next free position on the heap
+      ,@(assert-heap-offset 0) ;;For ref count
+      ,@(assert-heap-offset 1) ;;For first 8 bytes of GMP struct
+      ,@(assert-heap-offset 2) ;;For last 8 bytes of GMP struct
+      
+      ;;Initialize the reference count of the bignum that will be placed on the stack by increment to 1 (not 0 since we are going to increment it anyways).
+      ;;It is initialized to 1 because the for loop has a reference to it which it will loose and therefore
+      ;;cause it to be decremented. If at the point it is decremented, only the for loop has a reference to it,
+      ;;then it will be garbage collected as desired. But it is possible that a reference to it has been passed on
+      ;;within the body of the for loop.
+      (mov r15 1)
+      (mov (offset rdi 0) r15)
+      
+      (mov rsi rdi) ;;The second argument is an untagged pointer to a position on the heap where the resulting
+                    ;;GMP struct should ge placed
+      (add rsi 8) ;;make rsi point to the next free position i.e after the reference count
+      
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;The first argument is the bignum to be incremented
-      ;;The second argument is an untagged pointer to a position on the heap where the resulting
-      ;;GMP struct should ge placed
-      (mov rsi (offset rsp ,(- (+ 3 (length env)))))
-      ;;Update the new begining of the range on the stack.
-      ;;Keep the invariant that the value is tagged
-      (or rsi ,type-bignum)
-      (mov (offset rsp ,(- (add1 (length env)))) rsi)
-      (xor rsi ,type-bignum)
       
       (xor rdi ,type-bignum)
       (sub rsp ,stack-size)
       (call increment)
       (add rsp ,stack-size) ;;Restore the stack
+      
       ;;Update the value of rdi as saved on the stack
       (mov rdi (offset rsp ,(- (+ 3 (length env)))))
-      (add rdi 16)
-      ,@assert-heap
-      
+      (add rdi 24)
       (mov (offset rsp ,(- (+ 3 (length env)))) rdi)
       
+      ;;Decrement the reference count of the old value of v, possibly causing it to be garbage collected
+      (mov rax (offset rsp ,(- (add1 (length env)))))
+      ,@(decrement-ref-count continue2 stack-size #t)
+      ,continue2
+
+      ;;Place the new value of v on the stack
+      (mov rax (offset rsp ,(- (+ 3 (length env)))))
+      (sub rax 24)
+      (or rax ,type-bignum)
+      (mov (offset rsp ,(- (add1 (length env)))) rax)
       
+      ;;Compare the new value of v to the end of the range
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;make the incremented value the first argument to the comparison of the current value and the end of the range
       (xor rdi ,type-bignum)
       (mov rsi (offset rsp ,(- (+ 2 (length env))))) ;;pass the end of the range
@@ -459,6 +504,10 @@ type Variable =
       (cmp rax 0) ;;If the return value of compBignum is <= 0, then loop
       (jle ,loop)
 
+      ;;Decrement the reference count of the range
+      (mov rax (offset rsp ,(- (+ 5 (length env)))))
+      ,@(decrement-ref-count continue4 stack-size #t)
+      ,continue4
       (mov rax ,type-true)
       ,end)))
 
