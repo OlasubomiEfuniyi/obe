@@ -1082,24 +1082,35 @@ type Variable =
 (define (compile-greater e1 e2 env)
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
-        (stack-size (* 8 (+ 3 (length env))))
+        (stack-size (* 8 (+ 4 (length env))))
         (false (gensym "false"))
-        (end (gensym "end")))
+        (end (gensym "end"))
+        (continue1 (gensym "continue"))
+        (continue2 (gensym "continue"))
+        (continue3 (gensym "continue"))
+        (continue4 (gensym "continue")))
     `(,@c1
       ,@assert-bignum
+      ;;Increment the reference count of both arguments. Decrement the ref count at the end, forcing garbage collection if necessary
+      ,@(increment-ref-count continue1)
+      ,continue1
       (xor rax ,type-bignum);;Untag the pointer
       ;;Save the result of evaluating the first expression on the stack
       (mov (offset rsp ,(- (add1 (length env)))) rax)
 
       ,@c2
       ,@assert-bignum
+      ,@(increment-ref-count continue2)
+      ,continue2
       (xor rax ,type-bignum);;Untag the pointer
+      (mov (offset rsp ,(- (+ 2 (length env)))) rax)
+      
       ;;Save the stack
       (mov r15 rsp) ;;The function being called will take care of setting and restoring rbp
 
       ;;Save the registers used to pass in arguments
-      (mov (offset rsp ,(- (+ 2 (length env)))) rdi)
-      (mov (offset rsp ,(- (+ 3 (length env)))) rsi)
+      (mov (offset rsp ,(- (+ 3 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 4 (length env)))) rsi)
 
       ;;Call compBignum
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;Pass the first argument
@@ -1118,11 +1129,25 @@ type Variable =
       (mov rsp r15)
 
       ;;Restore the registers used to pass arguments
-      (mov rdi (offset rsp ,(- (+ 2 (length env)))))
-      (mov rsi (offset rsp ,(- (+ 3 (length env)))))
+      (mov rdi (offset rsp ,(- (+ 3 (length env)))))
+      (mov rsi (offset rsp ,(- (+ 4 (length env)))))
 
+      (mov (offset rsp ,(- (+ 3 (length env)))) rax);;Save the return value on the stack
+
+      ;;Decrement the reference count of the arguments
+      (mov rax (offset rsp ,(- (add1 (length env)))))
+      (or rax ,type-bignum)
+      ,@(decrement-ref-count continue3 stack-size #t)
+      ,continue3
+      (mov rax (offset rsp ,(- (+ 2 (length env)))))
+      (or rax ,type-bignum)
+      ,@(decrement-ref-count continue4 stack-size #t)
+      ,continue4
+      
       ;;Determine the appropriate boolean value to return
       (mov rbx 0)
+      (mov rax (offset rsp ,(- (+ 3 (length env)))))
+      
       (cmp rax rbx)
       (jle ,false)
       (mov rax ,type-true)
@@ -1136,24 +1161,35 @@ type Variable =
 (define (compile-less e1 e2 env)
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
-        (stack-size (* 8 (+ 3 (length env))))
+        (stack-size (* 8 (+ 4 (length env))))
         (false (gensym "false"))
-        (end (gensym "end")))
+        (end (gensym "end"))
+        (continue1 (gensym "continue"))
+        (continue2 (gensym "continue"))
+        (continue3 (gensym "continue"))
+        (continue4 (gensym "continue")))
     `(,@c1
       ,@assert-bignum
+      ;;Increment the reference count of both arguments. Decrement the ref count at the end, forcing garbage collection if necessary
+      ,@(increment-ref-count continue1)
+      ,continue1
       (xor rax ,type-bignum);;Untag the pointer
       ;;Save the result of evaluating the first expression on the stack
       (mov (offset rsp ,(- (add1 (length env)))) rax)
 
       ,@c2
       ,@assert-bignum
+      ,@(increment-ref-count continue2)
+      ,continue2
       (xor rax ,type-bignum);;Untag the pointer
+      (mov (offset rsp ,(- (+ 2 (length env)))) rax)
+      
       ;;Save the stack
       (mov r15 rsp) ;;The function being called will take care of setting and restoring rbp
 
       ;;Save the registers used to pass in arguments
-      (mov (offset rsp ,(- (+ 2 (length env)))) rdi)
-      (mov (offset rsp ,(- (+ 3 (length env)))) rsi)
+      (mov (offset rsp ,(- (+ 3 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 4 (length env)))) rsi)
 
       ;;Call compBignum
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;Pass the first argument
@@ -1172,11 +1208,25 @@ type Variable =
       (mov rsp r15)
 
       ;;Restore the registers used to pass arguments
-      (mov rdi (offset rsp ,(- (+ 2 (length env)))))
-      (mov rsi (offset rsp ,(- (+ 3 (length env)))))
+      (mov rdi (offset rsp ,(- (+ 3 (length env)))))
+      (mov rsi (offset rsp ,(- (+ 4 (length env)))))
 
+      (mov (offset rsp ,(- (+ 3 (length env)))) rax);;Save the return value on the stack
+
+      ;;Decrement the reference count of the arguments
+      (mov rax (offset rsp ,(- (add1 (length env)))))
+      (or rax ,type-bignum)
+      ,@(decrement-ref-count continue3 stack-size #t)
+      ,continue3
+      (mov rax (offset rsp ,(- (+ 2 (length env)))))
+      (or rax ,type-bignum)
+      ,@(decrement-ref-count continue4 stack-size #t)
+      ,continue4
+      
       ;;Determine the appropriate boolean value to return
       (mov rbx 0)
+      (mov rax (offset rsp ,(- (+ 3 (length env)))))
+      
       (cmp rax rbx)
       (jge ,false)
       (mov rax ,type-true)
@@ -1188,26 +1238,37 @@ type Variable =
 ;;Compile the greater than or equal logical operation
 ;;Expr  Expr CEnv -> ASM
 (define (compile-greater-equal e1 e2 env)
-  (let ((c1 (compile-e e1 env))
+(let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
-        (stack-size (* 8 (+ 3 (length env))))
+        (stack-size (* 8 (+ 4 (length env))))
         (false (gensym "false"))
-        (end (gensym "end")))
+        (end (gensym "end"))
+        (continue1 (gensym "continue"))
+        (continue2 (gensym "continue"))
+        (continue3 (gensym "continue"))
+        (continue4 (gensym "continue")))
     `(,@c1
       ,@assert-bignum
+      ;;Increment the reference count of both arguments. Decrement the ref count at the end, forcing garbage collection if necessary
+      ,@(increment-ref-count continue1)
+      ,continue1
       (xor rax ,type-bignum);;Untag the pointer
       ;;Save the result of evaluating the first expression on the stack
       (mov (offset rsp ,(- (add1 (length env)))) rax)
 
       ,@c2
       ,@assert-bignum
+      ,@(increment-ref-count continue2)
+      ,continue2
       (xor rax ,type-bignum);;Untag the pointer
+      (mov (offset rsp ,(- (+ 2 (length env)))) rax)
+      
       ;;Save the stack
       (mov r15 rsp) ;;The function being called will take care of setting and restoring rbp
 
       ;;Save the registers used to pass in arguments
-      (mov (offset rsp ,(- (+ 2 (length env)))) rdi)
-      (mov (offset rsp ,(- (+ 3 (length env)))) rsi)
+      (mov (offset rsp ,(- (+ 3 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 4 (length env)))) rsi)
 
       ;;Call compBignum
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;Pass the first argument
@@ -1226,11 +1287,25 @@ type Variable =
       (mov rsp r15)
 
       ;;Restore the registers used to pass arguments
-      (mov rdi (offset rsp ,(- (+ 2 (length env)))))
-      (mov rsi (offset rsp ,(- (+ 3 (length env)))))
+      (mov rdi (offset rsp ,(- (+ 3 (length env)))))
+      (mov rsi (offset rsp ,(- (+ 4 (length env)))))
 
+      (mov (offset rsp ,(- (+ 3 (length env)))) rax);;Save the return value on the stack
+
+      ;;Decrement the reference count of the arguments
+      (mov rax (offset rsp ,(- (add1 (length env)))))
+      (or rax ,type-bignum)
+      ,@(decrement-ref-count continue3 stack-size #t)
+      ,continue3
+      (mov rax (offset rsp ,(- (+ 2 (length env)))))
+      (or rax ,type-bignum)
+      ,@(decrement-ref-count continue4 stack-size #t)
+      ,continue4
+      
       ;;Determine the appropriate boolean value to return
       (mov rbx 0)
+      (mov rax (offset rsp ,(- (+ 3 (length env)))))
+      
       (cmp rax rbx)
       (jl ,false)
       (mov rax ,type-true)
@@ -1244,24 +1319,35 @@ type Variable =
 (define (compile-less-equal e1 e2 env)
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
-        (stack-size (* 8 (+ 3 (length env))))
+        (stack-size (* 8 (+ 4 (length env))))
         (false (gensym "false"))
-        (end (gensym "end")))
+        (end (gensym "end"))
+        (continue1 (gensym "continue"))
+        (continue2 (gensym "continue"))
+        (continue3 (gensym "continue"))
+        (continue4 (gensym "continue")))
     `(,@c1
       ,@assert-bignum
+      ;;Increment the reference count of both arguments. Decrement the ref count at the end, forcing garbage collection if necessary
+      ,@(increment-ref-count continue1)
+      ,continue1
       (xor rax ,type-bignum);;Untag the pointer
       ;;Save the result of evaluating the first expression on the stack
       (mov (offset rsp ,(- (add1 (length env)))) rax)
 
       ,@c2
       ,@assert-bignum
+      ,@(increment-ref-count continue2)
+      ,continue2
       (xor rax ,type-bignum);;Untag the pointer
+      (mov (offset rsp ,(- (+ 2 (length env)))) rax)
+      
       ;;Save the stack
       (mov r15 rsp) ;;The function being called will take care of setting and restoring rbp
 
       ;;Save the registers used to pass in arguments
-      (mov (offset rsp ,(- (+ 2 (length env)))) rdi)
-      (mov (offset rsp ,(- (+ 3 (length env)))) rsi)
+      (mov (offset rsp ,(- (+ 3 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 4 (length env)))) rsi)
 
       ;;Call compBignum
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;Pass the first argument
@@ -1280,11 +1366,25 @@ type Variable =
       (mov rsp r15)
 
       ;;Restore the registers used to pass arguments
-      (mov rdi (offset rsp ,(- (+ 2 (length env)))))
-      (mov rsi (offset rsp ,(- (+ 3 (length env)))))
+      (mov rdi (offset rsp ,(- (+ 3 (length env)))))
+      (mov rsi (offset rsp ,(- (+ 4 (length env)))))
 
+      (mov (offset rsp ,(- (+ 3 (length env)))) rax);;Save the return value on the stack
+
+      ;;Decrement the reference count of the arguments
+      (mov rax (offset rsp ,(- (add1 (length env)))))
+      (or rax ,type-bignum)
+      ,@(decrement-ref-count continue3 stack-size #t)
+      ,continue3
+      (mov rax (offset rsp ,(- (+ 2 (length env)))))
+      (or rax ,type-bignum)
+      ,@(decrement-ref-count continue4 stack-size #t)
+      ,continue4
+      
       ;;Determine the appropriate boolean value to return
       (mov rbx 0)
+      (mov rax (offset rsp ,(- (+ 3 (length env)))))
+      
       (cmp rax rbx)
       (jg ,false)
       (mov rax ,type-true)
@@ -1306,42 +1406,50 @@ type Variable =
         (pair (gensym "pair"))
         (simple (gensym "simple"))
         (empty-list (gensym "empty"))
-        (continue (gensym "continue")))
+        (continue (gensym "continue"))
+        (continue1 (gensym "continue"))
+        (continue2 (gensym "continue"))
+        (continue3 (gensym "continue"))
+        (continue4 (gensym "continue")))
     `(,@c1
-  
+      ;;Increment the reference count of both arguments. Decrement them at the end,
+      ;;possibly triggering garbage collection
+      ,@(increment-ref-count continue1)
+      ,continue1
       ;;Save the result of evaluating the first expression on the stack
       (mov (offset rsp ,(- (add1 (length env)))) rax)
 
       ,@c2
+      ,@(increment-ref-count continue2)
+      ,continue2
+      ;;Save the result of evaluating the second expression on the stack
       (mov (offset rsp ,(- (+ 2 (length env)))) rax)
       
-      (mov r10 (offset rsp ,(- (add1 (length env)))))
-      (mov r11 (offset rsp ,(- (+ 2 (length env)))))
+      (mov rax (offset rsp ,(- (add1 (length env)))))
+      (mov rbx (offset rsp ,(- (+ 2 (length env)))))
 
-      (and r10 ,result-type-mask)
-      (and r11 ,result-type-mask)
-      (cmp r10 r11)
+      ;;Make sure the two values being compared for equality are of the same type
+      (and rax ,result-type-mask)
+      (and rbx ,result-type-mask)
+      (cmp rax rbx)
       (jne ,false)
-      
-      ;;Save the stack
-      (mov r15 rsp) ;;The function being called will take care of setting and restoring rbp
 
       ;;Save the registers used to pass in arguments
       (mov (offset rsp ,(- (+ 3 (length env)))) rdi)
       (mov (offset rsp ,(- (+ 4 (length env)))) rsi)
 
-      ;;Call compBignum
+      ;;All the comp calls have the same argument structure
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;Pass the first argument
       (mov rsi rax) ;;Pass the second argument
 
 
-      (cmp r10 ,type-bignum)
+      (cmp rax ,type-bignum)
       (je ,bignum)
-      (cmp r10 ,type-list)
+      (cmp rax ,type-list)
       (je ,list)
-      (cmp r10 ,type-pair)
+      (cmp rax ,type-pair)
       (je ,pair)
-      (cmp r10 ,type-imm)
+      (cmp rax ,type-imm)
       (je ,simple)
       (jne err)
       
@@ -1381,20 +1489,24 @@ type Variable =
       (jmp ,end)
       
       ,continue
-      ;;Make sure the stack is as expected and then restore the stack
-      ;;stack pointer to where it was before the setup for the function
-      ;;call
-      (mov rbx r15) ;;Get the previous base of the stack
-      (sub rbx rsp) ;;Subtract it from the top of the stack. This should give us the stack size if everything went well
-      (cmp rbx ,stack-size)
-      (jne err)
-      (mov rsp r15)
+      (add rsp ,stack-size) ;;Restore the stack
 
       ;;Restore the registers used to pass arguments
       (mov rdi (offset rsp ,(- (+ 3 (length env)))))
       (mov rsi (offset rsp ,(- (+ 4 (length env)))))
 
+      (mov (offset rsp ,(- (+ 3 (length env)))) rax) ;;Save the return value of the comp function
+
+      ;;Decrement the reference count of the arguments
+      (mov rax (offset rsp ,(- (add1 (length env)))))
+      ,@(decrement-ref-count continue3 stack-size #t)
+      ,continue3
+      (mov rax (offset rsp ,(- (+ 2 (length env)))))
+      ,@(decrement-ref-count continue4 stack-size #t)
+      ,continue4
+      
       ;;Determine the appropriate boolean value to return
+      (mov rax (offset rsp ,(- (+ 3 (length env)))))
       (mov rbx 0)
       (cmp rax rbx)
       (jne ,false)
@@ -1410,15 +1522,25 @@ type Variable =
 (define (compile-add e1 e2 env)
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
-        (stack-size (* 8 (+ 5 (length env)))))
+        (stack-size (* 8 (+ 5 (length env))))
+        (continue1 (gensym "continue"))
+        (continue2 (gensym "continue"))
+        (continue3 (gensym "continue"))
+        (continue4 (gensym "continue")))
     `(,@c1
       ,@assert-bignum
+      ;;Increment the reference count of the first argument if its a chunk. The reference count will be decremented just before the end of add,
+      ;;thereby triggering garbage collection if necessary e.g For an argument expression whose result only has scope within this add expression
+      ,@(increment-ref-count continue1)
+      ,continue1
       ;;Untag the address before placing it on the stack
       (xor rax ,type-bignum)
       (mov (offset rsp ,(- (add1 (length env)))) rax) ;;Save the result of evaluating the first expression on the stack to prevent clobbering
 
       ,@c2
       ,@assert-bignum
+      ,@(increment-ref-count continue2)
+      ,continue2
       ;;Untag the address before placing it on the stack
       (xor rax ,type-bignum)
       (mov (offset rsp ,(- (+ 2 (length env)))) rax) ;;Save the result of evaluating the second expression on the stack to prevent loss when external functions are called
@@ -1428,17 +1550,30 @@ type Variable =
       (mov (offset rsp ,(- (+ 4 (length env)))) rsi)
       (mov (offset rsp ,(- (+ 5 (length env)))) rdx)
 
+
+      ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Create the new GMP struct;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+      ;;Initialize the reference count of the new GMP struct to 0
+      ;;Make sure there is enough space on the heap
+      ,@(assert-heap-offset 0) ;;For reference count
+      ,@(assert-heap-offset 1) ;;For first half of GMP struct
+      ,@(assert-heap-offset 2) ;;For second half of GMP struct
+      
+      (mov rbx 0)
+      (mov (offset rdi 0) rbx)
+      (add rdi 8)
+      (mov (offset rsp ,(- (+ 3 (length env)))) rdi) ;;Update the saved value of rdi
+
       ;;Setup for the gmp function calls required to add two bignums.
       ;;No need to do anything with rdi since it already contains the address of
       ;;the next free position on the heap
       (sub rsp ,stack-size);;Make rsp point to the top of the stack
-
       ;;initialize the gpm struct in the next free position on the heap, i.e the address pointed to by rdi
       (call my_mpz_init)
-     
+
+      ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Perform the addition;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       ;;add the two bignums and save the result in the newly initialized struct
       (add rsp ,stack-size) ;;Restore the stack to access the arguments for calling the addition function
-      (mov rdi (offset rsp ,(- (+ 3 (length env)))))
+      (mov rdi (offset rsp ,(- (+ 3 (length env))))) ;;Untagged pointer to the new GMP struct
       (mov rsi (offset rsp ,(- (add1 (length env))))) ;;Untagged pointer to the first bignum
       (mov rdx (offset rsp ,(- (+ 2 (length env))))) ;;Untagged pointer to the second bignum
 
@@ -1456,26 +1591,46 @@ type Variable =
       ;;Set rdi to the next free position on the heap. Add 16 because an mpz_t has a
       ;;size of 16 bytes. This may change in the future
       (add rdi 16)
-      ,@assert-heap
+
+      ;;Decrement the reference counts of the arguments to add
+      (mov rax (offset rsp ,(- (add1 (length env)))))
+      (or rax ,type-bignum) ;;Because the argument was untagged before placing it on the stack
+      ,@(decrement-ref-count continue3 stack-size #t)
+      ,continue3
+      (mov rax (offset rsp ,(- (+ 2 (length env)))))
+      (or rax ,type-bignum) ;;Because the argument was untagged before placing it on the stack
+      ,@(decrement-ref-count continue4 stack-size #t)
+      ,continue4
       
       ;;Return a tagged pointer to the result on the heap
       (mov rax (offset rsp ,(- (+ 3 (length env)))))
+      (sub rax 8) ;;Move 8 bytes down to include the reference count
       (or rax ,type-bignum))))
 
 ;;Compile the subtraction of two bignums
 ;;Expr Expr CEnv-> ASM
 (define (compile-sub e1 e2 env)
-   (let ((c1 (compile-e e1 env))
+    (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
-        (stack-size (* 8 (+ 5 (length env)))))
+        (stack-size (* 8 (+ 5 (length env))))
+        (continue1 (gensym "continue"))
+        (continue2 (gensym "continue"))
+        (continue3 (gensym "continue"))
+        (continue4 (gensym "continue")))
     `(,@c1
       ,@assert-bignum
+      ;;Increment the reference count of the first argument if its a chunk. The reference count will be decremented just before the end of add,
+      ;;thereby triggering garbage collection if necessary e.g For an argument expression whose result only has scope within this add expression
+      ,@(increment-ref-count continue1)
+      ,continue1
       ;;Untag the address before placing it on the stack
       (xor rax ,type-bignum)
       (mov (offset rsp ,(- (add1 (length env)))) rax) ;;Save the result of evaluating the first expression on the stack to prevent clobbering
 
       ,@c2
       ,@assert-bignum
+      ,@(increment-ref-count continue2)
+      ,continue2
       ;;Untag the address before placing it on the stack
       (xor rax ,type-bignum)
       (mov (offset rsp ,(- (+ 2 (length env)))) rax) ;;Save the result of evaluating the second expression on the stack to prevent loss when external functions are called
@@ -1485,17 +1640,30 @@ type Variable =
       (mov (offset rsp ,(- (+ 4 (length env)))) rsi)
       (mov (offset rsp ,(- (+ 5 (length env)))) rdx)
 
+
+      ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Create the new GMP struct;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+      ;;Initialize the reference count of the new GMP struct to 0
+      ;;Make sure there is enough space on the heap
+      ,@(assert-heap-offset 0) ;;For reference count
+      ,@(assert-heap-offset 1) ;;For first half of GMP struct
+      ,@(assert-heap-offset 2) ;;For second half of GMP struct
+      
+      (mov rbx 0)
+      (mov (offset rdi 0) rbx)
+      (add rdi 8)
+      (mov (offset rsp ,(- (+ 3 (length env)))) rdi) ;;Update the saved value of rdi
+
       ;;Setup for the gmp function calls required to add two bignums.
       ;;No need to do anything with rdi since it already contains the address of
       ;;the next free position on the heap
       (sub rsp ,stack-size);;Make rsp point to the top of the stack
-
       ;;initialize the gpm struct in the next free position on the heap, i.e the address pointed to by rdi
       (call my_mpz_init)
-     
+
+      ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Perform the addition;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       ;;add the two bignums and save the result in the newly initialized struct
       (add rsp ,stack-size) ;;Restore the stack to access the arguments for calling the addition function
-      (mov rdi (offset rsp ,(- (+ 3 (length env)))))
+      (mov rdi (offset rsp ,(- (+ 3 (length env))))) ;;Untagged pointer to the new GMP struct
       (mov rsi (offset rsp ,(- (add1 (length env))))) ;;Untagged pointer to the first bignum
       (mov rdx (offset rsp ,(- (+ 2 (length env))))) ;;Untagged pointer to the second bignum
 
@@ -1513,10 +1681,20 @@ type Variable =
       ;;Set rdi to the next free position on the heap. Add 16 because an mpz_t has a
       ;;size of 16 bytes. This may change in the future
       (add rdi 16)
-      ,@assert-heap
+
+      ;;Decrement the reference counts of the arguments to add
+      (mov rax (offset rsp ,(- (add1 (length env)))))
+      (or rax ,type-bignum) ;;Because the argument was untagged before placing it on the stack
+      ,@(decrement-ref-count continue3 stack-size #t)
+      ,continue3
+      (mov rax (offset rsp ,(- (+ 2 (length env)))))
+      (or rax ,type-bignum) ;;Because the argument was untagged before placing it on the stack
+      ,@(decrement-ref-count continue4 stack-size #t)
+      ,continue4
       
       ;;Return a tagged pointer to the result on the heap
       (mov rax (offset rsp ,(- (+ 3 (length env)))))
+      (sub rax 8) ;;Move 8 bytes down to include the reference count
       (or rax ,type-bignum))))
   
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Assertions;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
