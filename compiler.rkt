@@ -698,18 +698,38 @@ type Variable =
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
         (list (gensym "list"))
-        (end (gensym "end")))
+        (end (gensym "end"))
+        (stack-size (* 8 (+ 2 (length env))))
+        (continue1 (gensym "continue"))
+        (continue2 (gensym "continue")))
     `(,@c1
+      ;;The list/pair holds a reference to value e1 evaluates to. It is the head/first of the structure
+      ,@(increment-ref-count continue1)
+      ,continue1
       (mov (offset rsp ,(- (add1 (length env)))) rax);;Save the result of evaluating the first expression on the stack
+      
       ,@c2
-      ,@(assert-heap-offset 0)
+      ;;The list/pair holds a reference to the value e2 evaluates to. It is the tail/second of the structure
+      ,@(increment-ref-count continue2)
+      ,continue2
+      (mov (offset rsp ,(- (+ 2 (length env)))) rax);;Save the result of evaluating the second expression on the stack
+
+      ,@(assert-heap-offset 0) ;;Make sure there is enough heap space for the structure's ref count
+      (mov rbx 0)
+      (mov (offset rdi 0) rbx) ;;ref count of the structure is initialized to 0
+      
+      ,@(assert-heap-offset 1) ;;Make sure there is enough heap space for the structure's head/first
       (mov rbx (offset rsp ,(- (add1 (length env)))))
-      (mov (offset rdi 0) rbx) ;;Move the first value on the heap
-      ,@(assert-heap-offset 1)
-      (mov (offset rdi 1) rax) ;;Move the second value on the heap
-      (mov rbx rax) ;;Save the second value for use later. Make sure it is not overwritten before it is used
-      (mov rax rdi) ;;Save a pointer to the beginning of the pair
+      (mov (offset rdi 1) rbx) ;;Move the first value on the heap
+      
+      ,@(assert-heap-offset 2) ;;Make sure there is enough heap space for the structure's tail/second
+      (mov rbx (offset rsp ,(- (+ 2 (length env)))))
+      (mov (offset rdi 2) rbx) ;;Move the second value on the heap
+      
+      (mov rax rdi) ;;get the address to the beginning of the list/pair
+      
       ;;Determine if this is a list or just a pair. It is a list if the second operand is a list or the empty list
+      (mov rbx (offset rsp ,(- (+ 2 (length env)))))
       (cmp rbx ,type-empty-list)
       (je ,list)
       (and rbx ,result-type-mask)
@@ -720,7 +740,7 @@ type Variable =
       ,list
       (or rax ,type-list);;Tag the pointer as a list
       ,end
-      (add rdi 16)))) ;;Make rdi contain the address of the next free location on the heap
+      (add rdi 24)))) ;;Make rdi contain the address of the next free location on the heap
       
 
 

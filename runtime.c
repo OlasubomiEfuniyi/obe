@@ -141,19 +141,16 @@ Returns 0 if they are equal and -1 otherwise*/
 int64_t listEqual(int64_t arg0, int64_t arg1) {
 	int64_t* a0 = (int64_t*)(arg0 ^ type_list);
 	int64_t* a1 = (int64_t*)(arg1 ^ type_list);
-
-	printList(arg0);
-	printf("Hi\n");	
+	
 	if((arg0 == type_empty_list && arg1 != type_empty_list) || 
 		(arg0 != type_empty_list && arg1 == type_empty_list)) {
 		return -1;
 	} else if(arg0 == type_empty_list && arg1 == type_empty_list) {
 		return 0;
-	} else if(compValue(*a0, *a1) != 0) {
+	} else if(compValue(*(a0 + 1), *(a1 + 1)) != 0) { //The head of the list is at offset 1
 		return -1;
 	} else {
-		printf("Hello\n");
-		return listEqual(*(a0 + 1), *(a1 + 1));
+		return listEqual(*(a0 + 2), *(a1 + 2));  //The tail of the list is at offset 2
 	}
 }
 
@@ -163,21 +160,26 @@ int64_t pairEqual(int64_t arg0, int64_t arg1) {
 	int64_t* a0 = (int64_t*)(arg0 ^ type_pair);
 	int64_t* a1 = (int64_t*)(arg1 ^ type_pair);
 	
-	//Cpmpare the first value of each pair
-	if(compValue(*a0, *a1) != 0) {
+	printf("Hello\n");
+	printPair(arg0);
+	//printPair(arg1);
+	//Compare the first value of each pair
+	if(compValue(*(a0 + 1), *(a1 + 1) != 0)) { //The first element of the pair is at offset 1
 		return -1;
 	} 
 
-	if(((((*(a0 + 1)) & result_type_mask) == type_pair) && 
-		(((*(a1 + 1)) & result_type_mask) != type_pair)) ||
-	   ((((*(a0 + 1)) & result_type_mask) != type_pair) && 
-		(((*(a1 + 1)) & result_type_mask) == type_pair))) {
+	printf("post\n");
+	if(((((*(a0 + 2)) & result_type_mask) == type_pair) && 
+		(((*(a1 + 2)) & result_type_mask) != type_pair)) ||
+	   ((((*(a0 + 2)) & result_type_mask) != type_pair) && 
+		(((*(a1 + 2)) & result_type_mask) == type_pair))) { //The second element of the pair is at offset 2
 		return -1;
-	} else if(((((*(a0 + 1)) & result_type_mask) != type_pair) && 
-		(((*(a1 + 1)) & result_type_mask) != type_pair))) { 
-		return compValue(*(a0 + 1), *(a1 + 1));
+	} else if(((((*(a0 + 2)) & result_type_mask) != type_pair) && 
+		(((*(a1 + 2)) & result_type_mask) != type_pair))) { //The second element of the pair is at offset 2 
+		return compValue(*(a0 + 2), *(a1 + 2));
 	} else {
-		return pairEqual(*(a0 + 1), *(a1 + 1));
+		printf("Hi\n");
+		return pairEqual(*(a0 + 2), *(a1 + 2)); //The second element of the pair is at offset 2
 	}
 }
 
@@ -248,6 +250,8 @@ void printValue(int64_t value) {
 void printList(int64_t value) {
 	int64_t* start_addr = (int64_t *)(value ^ type_list);
 	if(*start_addr != type_empty_list) {
+		printf("[Ref count: %" PRId64 "]", *start_addr);
+		start_addr++;
 		printValue(*start_addr);
 		value = *(start_addr + 1);
 		if ((value & result_type_mask) == type_list) {
@@ -262,11 +266,12 @@ void printList(int64_t value) {
 
 /* Print a pair of values */
 void  printPair(int64_t value) {
+	printf("Printing a pair\n");
 	int64_t* start_addr  = (int64_t *)(value ^ type_pair);
-
+		printf("[Ref count: %" PRId64 "]", *start_addr);
+		start_addr++;
 		printValue(*start_addr);
 		value = *(start_addr + 1);
-
 		//Check if the next value is another pair or the final value in
 		//a chain of pairs
 		if((value & result_type_mask) == type_pair) {
@@ -318,14 +323,11 @@ void rotateString(char* str) {
 
 /* Determine which comparison function to use based on the type of value to be compared */
 int64_t compValue(int64_t value1, int64_t value2) {
-	printf("compValue\n");
 	switch(value1 & result_type_mask) {
 		case type_bignum:
-			printf("I am a bignum\n");
 			//untag pointers to bignum as expected by compBignum
 			return compBignum((value1 ^ type_bignum), (value2 ^ type_bignum));
 		case type_list:
-			printf("I am a list\n");
 			return listEqual(value1, value2);
 		case type_pair:
 			return pairEqual(value1, value2);
