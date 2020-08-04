@@ -142,6 +142,8 @@ int64_t listEqual(int64_t arg0, int64_t arg1) {
 	int64_t* a0 = (int64_t*)(arg0 ^ type_list);
 	int64_t* a1 = (int64_t*)(arg1 ^ type_list);
 
+	printList(arg0);
+	printf("Hi\n");	
 	if((arg0 == type_empty_list && arg1 != type_empty_list) || 
 		(arg0 != type_empty_list && arg1 == type_empty_list)) {
 		return -1;
@@ -150,6 +152,7 @@ int64_t listEqual(int64_t arg0, int64_t arg1) {
 	} else if(compValue(*a0, *a1) != 0) {
 		return -1;
 	} else {
+		printf("Hello\n");
 		return listEqual(*(a0 + 1), *(a1 + 1));
 	}
 }
@@ -190,7 +193,7 @@ void printValue(int64_t value) {
 	int64_t* addr;
 
 	switch(value & result_type_mask) {
-	case type_bignum:		
+	case type_bignum:			
 		printBignum(value);	
 		break;
 	case type_list:
@@ -315,11 +318,14 @@ void rotateString(char* str) {
 
 /* Determine which comparison function to use based on the type of value to be compared */
 int64_t compValue(int64_t value1, int64_t value2) {
+	printf("compValue\n");
 	switch(value1 & result_type_mask) {
 		case type_bignum:
+			printf("I am a bignum\n");
 			//untag pointers to bignum as expected by compBignum
 			return compBignum((value1 ^ type_bignum), (value2 ^ type_bignum));
 		case type_list:
+			printf("I am a list\n");
 			return listEqual(value1, value2);
 		case type_pair:
 			return pairEqual(value1, value2);

@@ -1440,7 +1440,7 @@ type Variable =
 
       ;;All the comp calls have the same argument structure
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;Pass the first argument
-      (mov rsi rax) ;;Pass the second argument
+      (mov rsi (offset rsp ,(- (+ 2 (length env))))) ;;Pass the second argument
 
 
       (cmp rax ,type-bignum)
