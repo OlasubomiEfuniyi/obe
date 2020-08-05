@@ -141,6 +141,8 @@ type Variable =
     [(? logic? expr) (desugar-logic expr)]
     [(? display? expr) (desugar-display expr)]
     [(? loop? expr) (desugar-loop expr)]
+    ;;;;;;;;;;;;;;;;For testing purposes;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+    [`(ref-eq ,chunk ,(? integer? i)) `(ref-eq ,(desugar chunk) ,i)] ;;num must be an integer in its literal sense.
     [_ (error "Invalid Program")]))
 
 ;;Desugar a value
@@ -269,6 +271,8 @@ type Variable =
     [(? logic? expr) (compile-logic expr env)]
     [(? display? expr) (compile-display expr env)]
     [(? loop? expr) (compile-loop expr env)]
+    ;;;;;;;;;;;;;;;;;;;;For testing purposes;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+    [`(ref-eq ,chunk ,(? integer? i)) (compile-ref-eq chunk i env)];;num must be an integer in the literal sense
     [_ (error "Invalid Program")]))
 
 
@@ -337,36 +341,65 @@ type Variable =
 ;;Compile the unbox operation
 ;;Expr CEnv -> ASM
 (define (compile-unbox e1 env)
-  `(
-    ,@(compile-e e1 env)
-    ,@assert-box
-    ;;Since unbox would only increase the reference count of the box by 1
-    ;;only to decrease it by 1 before it finishes, there is no need to
-    ;;perform reference count manipulation in unbox
-    (xor rax ,type-box)
-    (mov rax (offset rax 1))))
+  (let ((continue1 (gensym "continue"))
+        (continue2 (gensym "continue"))
+        (continue3 (gensym "continue"))
+        (continue4 (gensym "continue"))
+        (stack-size (* 8 (+ 2 (length env)))))
+    `(
+      ,@(compile-e e1 env)
+      ,@assert-box
+      ;;Increment the reference count of the box
+      ,@(increment-ref-count continue1)
+      ,continue1
+      (mov (offset rsp ,(- (add1 (length env)))) rax) ;;Save the box on the stack
+      
+      (xor rax ,type-box)
+      (mov rax (offset rax 1))
+      ;;unbox should increment the ref count of the value within the box. That way, if the box is being
+      ;;garbage collected and it is the only one with a reference to the value, this value will not be
+      ;;garbage collected.
+      ,@(increment-ref-count continue2)
+      ,continue2
+      
+      (mov (offset rsp ,(- (+ 2 (length env)))) rax) ;;temporarily save the return value on the stack
+      ;;Decrement the reference count of the box
+      (mov rax (offset rsp ,(- (add1 (length env)))))
+      ,@(decrement-ref-count continue3 stack-size #t)
+      ,continue3
+      ;;Decrement the reference count of the unboxed value, but do not attempt to garbage collect it since it is the
+      ;;return value of unbox
+      (mov rax (offset rsp ,(- (+ 2 (length env)))))
+      ,@(decrement-ref-count continue4 stack-size #f)
+      ,continue4
+      ;;Return the unboxed value
+      )))
+
 
 (define (compile-set e1 e2 env)
   (let ((continue (gensym "continue"))
         (post-decr (gensym "postDecrement"))
-        (stack-size (* 8 (+ 1 (length env)))))
+        (stack-size (* 8 (+ 2 (length env))))
+        (continue1 (gensym "continue"))
+        (continue2 (gensym "continue"))
+        (continue3 (gensym "continue"))
+        (continue4 (gensym "continue"))
+        (continue5 (gensym "continue")))
     `(
       ;;Compile the box
       ,@(compile-e e1 env)
       ,@assert-box
-      ;;Since set would only increase the reference count of the box by 1
-      ;;only to decrease it by 1 before it finishes, there is no need to
-      ;;perform reference count manipulation of the box in set
+      ;;Increment the reference count of the box
+      ,@(increment-ref-count continue1)
+      ,continue1
       (mov (offset rsp ,(- (add1 (length env)))) rax)
 
       ;;Compile the value
       ,@(compile-e e2 (extend #f env))
-      ;;Increment the reference count of the value. This is important because the box
-      ;;where this value is to be placed will hold 1 more reference to it
-      ,@(increment-ref-count continue)
-
-      ,continue
-      (mov r15 rax) ;;save the new value to be placed in the box
+      ;;Increment the reference count of the value
+      ,@(increment-ref-count continue2)
+      ,continue2
+      (mov (offset rsp ,(- (+ 2 (length env)))) rax) ;;save the new value to be placed in the box
 
       ;;Decrement the reference count of the value that is to be replaced if it is a pointer to a chunk on the heap
       ;;since the box will no longer hold a reference to it
@@ -379,9 +412,23 @@ type Variable =
       ;;Untag the pointer to the box and replace the value in the box
       (mov rax (offset rsp ,(- (add1 (length env)))))
       (xor rax ,type-box)
-      (mov (offset rax 1) r15)
-      ;;Tag the pointer to the box again before returning it
-      (or rax ,type-box))))
+      (mov rbx (offset rsp ,(- (+ 2 (length env)))))
+      (mov (offset rax 1) rbx)
+      ;;Increment the reference to the value that was just placed in the box. The box now has a reference to it
+      (mov rax (offset rsp ,(- (+ 2 (length env)))))
+      ,@(increment-ref-count continue3)
+      ,continue3
+      ;;Decrement the reference count of the box. If ref count is 0 do not garbage collect it since it is the return value
+      (mov rax (offset rsp ,(- (add1 (length env)))))
+      ,@(decrement-ref-count continue4 stack-size #f)
+      ,continue4
+      ;;Decrement the reference count of the value placed in the box. set is losing the reference it temporarily held to the value
+      (mov rax (offset rsp ,(- (+ 2 (length env)))))
+      ,@(decrement-ref-count continue5 stack-size #t)
+      ,continue5
+      ;;Return a tagged pointer to the box
+      (mov rax (offset rsp ,(- (add1 (length env))))))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile Loop;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Compile a loop expression
 ;;Loop CEnv -> ASM
@@ -2046,7 +2093,43 @@ type Variable =
   (match expr
     [`(for ,v in ,expr do ,exprs ..1) #t]
     [_ #f]))
-    
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Language features used for testing purposes;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;Expr integer CEnv-> ASM
+(define (compile-ref-eq chunk integer env)
+  (let ((end (gensym "end"))
+        (false (gensym "false"))
+        (stack-size (* 8 (length env)))
+        (continue1 (gensym "continue"))
+        (continue2 (gensym "continue")))
+    `(,@(compile-e chunk env)
+      ;;Increment the reference count of the chunk
+      ,@(increment-ref-count continue1)
+      ,continue1
+      ;;Make sure the result of evaluating the "chunk" is actually a chunk
+      (mov rbx rax)
+      (and rbx ,result-type-mask)
+      (cmp rbx ,type-imm) 
+      (je err) ;;The value is either an immediate or a chunk. If it is an immediate, this function raises an error.
+      
+      ;;The value is a chunk. Its integer ref count is at offset 0
+      (and rax ,clear-tag) ;;Untag the chunk
+      (mov rax (offset rax 0))
+
+      ;;Decrement the reference count of the chunk
+      ,@(decrement-ref-count continue2 stack-size #t)
+      ,continue2
+      
+      ;;Determine which boolean should be returned
+      (mov rbx ,integer)
+      (cmp rax rbx)
+      (jne ,false)
+      (mov rax ,type-true)
+      (jmp ,end)
+      ,false
+      (mov rax ,type-false)
+      ,end
+      )))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Tests;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (module+ test
   ;;Test integers
@@ -2338,7 +2421,12 @@ type Variable =
   (check-equal? (execute (compile `(set (box 5) 6))) '#&6)
   (check-equal? (execute (compile `(set (box 5) #t))) '#&#t)
   (check-equal? (execute (compile `(set 6 (box 5)))) 'err)
-  (check-equal? (execute (compile `(set (set (box 5) 6) 7))) '#&7))
+  (check-equal? (execute (compile `(set (set (box 5) 6) 7))) '#&7)
+
+
+  ;;Test reference count
+  (check-equal? (execute (compile `(ref-eq 5 0))) #t)
+  )
 
   
 
