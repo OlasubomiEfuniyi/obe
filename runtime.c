@@ -160,15 +160,10 @@ int64_t pairEqual(int64_t arg0, int64_t arg1) {
 	int64_t* a0 = (int64_t*)(arg0 ^ type_pair);
 	int64_t* a1 = (int64_t*)(arg1 ^ type_pair);
 	
-	printf("Hello\n");
-	printPair(arg0);
-	//printPair(arg1);
-	//Compare the first value of each pair
-	if(compValue(*(a0 + 1), *(a1 + 1) != 0)) { //The first element of the pair is at offset 1
+	if(compValue(*(a0 + 1), *(a1 + 1)) != 0) { //The first element of the pair is at offset 1
 		return -1;
 	} 
 
-	printf("post\n");
 	if(((((*(a0 + 2)) & result_type_mask) == type_pair) && 
 		(((*(a1 + 2)) & result_type_mask) != type_pair)) ||
 	   ((((*(a0 + 2)) & result_type_mask) != type_pair) && 
@@ -178,7 +173,6 @@ int64_t pairEqual(int64_t arg0, int64_t arg1) {
 		(((*(a1 + 2)) & result_type_mask) != type_pair))) { //The second element of the pair is at offset 2 
 		return compValue(*(a0 + 2), *(a1 + 2));
 	} else {
-		printf("Hi\n");
 		return pairEqual(*(a0 + 2), *(a1 + 2)); //The second element of the pair is at offset 2
 	}
 }
@@ -266,7 +260,6 @@ void printList(int64_t value) {
 
 /* Print a pair of values */
 void  printPair(int64_t value) {
-	printf("Printing a pair\n");
 	int64_t* start_addr  = (int64_t *)(value ^ type_pair);
 		printf("[Ref count: %" PRId64 "]", *start_addr);
 		start_addr++;
