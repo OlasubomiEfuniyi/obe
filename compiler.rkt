@@ -455,8 +455,9 @@ type Variable =
       ;;I increment and then decrement the reference count because in a case where the range expression was only created to be used by the for loop, the decrement
       ;;step, in undoing the increment will also cause a garbage collection of the range. However, it is possible that the for loop is referencing an already exisiting
       ;;range.
-      ;;NOTE: The for loop cannot pass along a reference to the range. It can however pass along a reference to the beginning of the range
-      ;;or any of the successive bignums created while iterating over the range.
+      ;;NOTE: The for loop cannot pass along a reference to the range. It can however pass along a reference to the beginning of the range because this implementation
+      ;;takes it on as the value associated with the variable initially. It can also pass on a reference to 
+      ;;any of the successive bignums created while iterating over the range. This implementation never takes on a reference to the end of the range.
       ,@(increment-ref-count continue1)
       ,continue1
       ,@assert-range
@@ -2099,13 +2100,15 @@ type Variable =
 (define (compile-ref-eq chunk integer env)
   (let ((end (gensym "end"))
         (false (gensym "false"))
-        (stack-size (* 8 (length env)))
+        (stack-size (* 8 (+ 1 (length env))))
         (continue1 (gensym "continue"))
         (continue2 (gensym "continue")))
     `(,@(compile-e chunk env)
       ;;Increment the reference count of the chunk
       ,@(increment-ref-count continue1)
       ,continue1
+      (mov (offset rsp ,(- (add1 (length env)))) rax)
+      
       ;;Make sure the result of evaluating the "chunk" is actually a chunk
       (mov rbx rax)
       (and rbx ,result-type-mask)
@@ -2115,25 +2118,32 @@ type Variable =
       ;;The value is a chunk. Its integer ref count is at offset 0
       (and rax ,clear-tag) ;;Untag the chunk
       (mov rax (offset rax 0))
-
-      ;;Decrement the reference count of the chunk
-      ,@(decrement-ref-count continue2 stack-size #t)
-      ,continue2
       
       ;;Determine which boolean should be returned
       (mov rbx ,integer)
+      (sub rax 1) ;;Not considering the reference this function has to the chunk
       (cmp rax rbx)
       (jne ,false)
       (mov rax ,type-true)
       (jmp ,end)
       ,false
       (mov rax ,type-false)
+
       ,end
+      (mov rbx rax)
+      (mov rax (offset rsp ,(- (add1 (length env))))) ;;Get the tagged chunk into rax
+      (mov (offset rsp ,(- (add1 (length env)))) rbx) ;;Save the return value on the stack
+      
+      ;;Decrement the reference count of the chunk
+      ,@(decrement-ref-count continue2 stack-size #t)
+      ,continue2
+
+      (mov rax (offset rsp ,(- (add1 (length env))))) ;:Get the return value from the stack
       )))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Tests;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (module+ test
   ;;Test integers
-  (check-equal? (execute (compile 5)) 5)
+  #|(check-equal? (execute (compile 5)) 5)
   (check-equal? (execute (compile -5)) -5)
   
   ;;Test bignum
@@ -2421,11 +2431,14 @@ type Variable =
   (check-equal? (execute (compile `(set (box 5) 6))) '#&6)
   (check-equal? (execute (compile `(set (box 5) #t))) '#&#t)
   (check-equal? (execute (compile `(set 6 (box 5)))) 'err)
-  (check-equal? (execute (compile `(set (set (box 5) 6) 7))) '#&7)
+  (check-equal? (execute (compile `(set (set (box 5) 6) 7))) '#&7) |#
 
 
-  ;;Test reference count
-  (check-equal? (execute (compile `(ref-eq 5 0))) #t)
+  ;;Test let reference count
+  (check-equal? (execute (compile `(let ((x (box 10))) (ref-eq x 1)
+                                     (let ((y x) (z x)) (ref-eq x 3) (ref-eq y 3) (ref-eq z 3))))) #t)
+  (check-equal? (execute (compile `(let () (ref-eq (let ((y 5)) (ref-eq y 1) y) 0) (ref-eq (let ((y 5)) (ref-eq y 1) y) 0)))) #t)
+  
   )
 
   

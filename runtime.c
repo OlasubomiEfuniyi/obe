@@ -25,7 +25,8 @@
 
 #define true 1
 #define false 0
-
+#define GC_INFO(...) (gc_info && printf(__VA_ARGS__))
+ 
 typedef char bool;
 int64_t entry(void* heap, void* heap_start_addr, int64_t h_size);
 void printResult(int64_t value);
@@ -38,6 +39,8 @@ int comBignum(int64_t arg0, int64_t arg1);
 int error(void);
 int runtimeSystemError(void);
 
+bool gc_info = false; //Set to true if garbage collection  information should be printed with chunks and upon triggering garbage collection. false otherwise.
+
 /* From this method, the compiled program is initiated by calling the entry function in assembly.
 The entry function is linked with this RTS 
 We use the GMP Library to support arbitrary precision integers */
@@ -48,6 +51,11 @@ int main(int argc, char** argv) {
 	if(heap == NULL) {
 		fprintf(stderr, "could not allocate heap space");
 		exit(1);
+	}
+	
+	//Check if printing gc info is desired
+	if(argc > 1 && (strcmp(*(argv + 1), "gc") == 0)) {
+		gc_info = true;
 	}
 
 	/* Entry may either return a 64 bit value via a register or a pointer to a result */
@@ -218,7 +226,7 @@ void printValue(int64_t value) {
 		}
 		break;
 	case type_range:
-		printf("Ref Count: %" PRId64 " Value: ", *((int64_t *)(value ^ type_range)));
+		GC_INFO("Ref Count: %" PRId64 " Value: ", *((int64_t *)(value ^ type_range)));
 		printf("(");
 		addr = ((int64_t *) (value ^ type_range)) + 1;
 		printBignum(*addr);
@@ -229,7 +237,7 @@ void printValue(int64_t value) {
 		printf(")");
 		break;
 	case type_box:
-		printf("Ref Count: %" PRId64 " Value: ", *((int64_t*)(value ^ type_box)));
+		GC_INFO("Ref Count: %" PRId64 " Value: ", *((int64_t*)(value ^ type_box)));
 		printf("#&");
 		printValue(*(((int64_t*)(value ^ type_box) + 1)));
 
@@ -244,7 +252,7 @@ void printValue(int64_t value) {
 void printList(int64_t value) {
 	int64_t* start_addr = (int64_t *)(value ^ type_list);
 	if(*start_addr != type_empty_list) {
-		printf("[Ref count: %" PRId64 "]", *start_addr);
+		GC_INFO("[Ref count: %" PRId64 "]", *start_addr);
 		start_addr++;
 		printValue(*start_addr);
 		value = *(start_addr + 1);
@@ -261,7 +269,7 @@ void printList(int64_t value) {
 /* Print a pair of values */
 void  printPair(int64_t value) {
 	int64_t* start_addr  = (int64_t *)(value ^ type_pair);
-		printf("[Ref count: %" PRId64 "]", *start_addr);
+		GC_INFO("[Ref count: %" PRId64 "]", *start_addr);
 		start_addr++;
 		printValue(*start_addr);
 		value = *(start_addr + 1);
@@ -283,7 +291,7 @@ void printBignum(int64_t value) {
 	//Clear the tagging to get the address
 	int64_t* result = (int64_t*)(value ^ type_bignum);
  
-	printf("Ref Count: %" PRId64 " Value: ", *result);
+	GC_INFO("Ref Count: %" PRId64 " Value: ", *result);
 	mpz_t* gmp = (mpz_t*)(result + 1);
 	
 	mpz_out_str(stdout,10,*gmp);
@@ -344,9 +352,13 @@ int64_t compValue(int64_t value1, int64_t value2) {
 }
 
 void garbageCollect(int64_t ref) {
-	printf("About to garbage collect ");
-	printValue(ref);
-	printf("\n");
+	GC_INFO("About to garbage collect ");
+	if(gc_info == true) {
+		printValue(ref);
+	}
+	if(gc_info == true) {
+		printf("\n");
+	}
 }
 
 /* Signal an error while executing the program */
