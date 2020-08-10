@@ -724,7 +724,7 @@ type Variable =
     `(,@c1
       ,@assert-list
       (xor rax ,type-list);;Untag the pointer
-      (mov rax (offset rax 0)))))
+      (mov rax (offset rax 1)))))
 
 
 ;;Compile the tail operation
@@ -733,7 +733,7 @@ type Variable =
     `(,@c1
       ,@assert-list
       (xor rax ,type-list);;Untag the pointer
-      (mov rax (offset rax 1)))))
+      (mov rax (offset rax 2)))))
 
 
 
@@ -805,9 +805,20 @@ type Variable =
 ;;Expr CEnv -> ASM
 (define (compile-first expr env)
   (let ((untag-pair (gensym "untag"))
-        (continue (gensym "continue")))
+        (stack-size (* 8 (+ 2 (length env))))
+        (continue (gensym "continue"))
+        (continue1 (gensym "continue"))
+        (continue2 (gensym "continue"))
+        (continue3 (gensym "continue"))
+        (continue4 (gensym "continue")))
   `(,@(compile-e expr env)
     ,@(assert-pair-list)
+    ;;Increment the ref count of the pair
+    ,@(increment-ref-count continue1)
+    ,continue1
+    ;;Save a pointer to the pair on the stack
+    (mov (offset rsp ,(- (add1 (length env)))) rax)
+    
     ;;Untag the address
     (mov rbx rax)
     (and rbx ,result-type-mask)
@@ -818,15 +829,45 @@ type Variable =
     ,untag-pair
     (xor rax ,type-pair)
     ,continue
-    (mov rax (offset rax 0)))))
+    (mov rax (offset rax 1))
+    
+    ;;Temporarily increment the reference count of the first item in the pair to avoid
+    ;;its garbage collection if the list is garbage collected
+    ,@(increment-ref-count continue2)
+    ,continue2
+    
+    ;;Save the return value on the stack
+    (mov (offset rsp ,(- (+ 2 (length env)))) rax)
+    
+    ;;Decrement the ref count of the list
+    (mov rax (offset rsp ,(- (add1 (length env)))))
+    ,@(decrement-ref-count continue3 stack-size #t)
+    ,continue3
+
+    (mov rax (offset rsp ,(- (+ 2 (length env)))))
+    ;;Decrement the ref count of the first item in the pair, but do not garbage collect if it drops to 0 since it will be returned
+    ,@(decrement-ref-count continue4 stack-size #f)
+    ,continue4)))
 
 ;;Compile second operation on a pair
 ;;Expr CEnv -> ASM
 (define (compile-second expr env)
   (let ((untag-pair (gensym "untag"))
-        (continue (gensym "continue")))
+        (stack-size (* 8 (+ 2 (length env))))
+        (continue (gensym "continue"))
+        (continue1 (gensym "continue"))
+        (continue2 (gensym "continue"))
+        (continue3 (gensym "continue"))
+        (continue4 (gensym "continue")))
   `(,@(compile-e expr env)
     ,@(assert-pair-list)
+    ;;Increment the ref count of the pair
+    ,@(increment-ref-count continue1)
+    ,continue1
+
+    ;;Save the pair on the stack
+    (mov (offset rsp ,(- (add1 (length env)))) rax)
+    
     ;;Untag the address
     (mov rbx rax)
     (and rbx ,result-type-mask)
@@ -837,7 +878,24 @@ type Variable =
     ,untag-pair
     (xor rax ,type-pair)
     ,continue
-    (mov rax (offset rax 1)))))
+    (mov rax (offset rax 2))
+    ;;Temporarily increment the ref count of the rest of the pair to prevent its garbage collection
+    ;;if the pair is garbage collected
+    ,@(increment-ref-count continue2)
+    ,continue2
+
+    ;;Save the return value on the stack
+    (mov (offset rsp ,(- (+ 2 (length env)))) rax)
+
+    ;;Decrement the ref count of the pair
+    (mov rax (offset rsp ,(- (add1 (length env)))))
+    ,@(decrement-ref-count continue3 stack-size #t)
+    ,continue3
+
+    ;;Decrement the ref count of the rest of the pair but do not garbage collect since it is a return value
+    (mov rax (offset rsp ,(- (+ 2 (length env)))))
+    ,@(decrement-ref-count continue4 stack-size #f)
+    ,continue4)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile Range;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Compile a range expression, starting from the first integer and not including the last integer
@@ -2438,7 +2496,13 @@ type Variable =
   (check-equal? (execute (compile `(let ((x (box 10))) (ref-eq x 1)
                                      (let ((y x) (z x)) (ref-eq x 3) (ref-eq y 3) (ref-eq z 3))))) #t)
   (check-equal? (execute (compile `(let () (ref-eq (let ((y 5)) (ref-eq y 1) y) 0) (ref-eq (let ((y 5)) (ref-eq y 1) y) 0)))) #t)
-  
+  (check-equal? (execute (compile `(let ((x 10)) (add x (let () (ref-eq x 2) 2))))) 12)
+  (check-equal? (execute (compile `(let ((x 10) (y 11)) (add x (add y (let ((z y)) (ref-eq y 3) (ref-eq x 2) 0)))))) 21)
+
+  ;;Test list reference count
+  (check-equal? (execute (compile `(ref-eq (cons 1 '()) 0))) #t)
+  (check-equal? (execute (compile `(let ((a 2) (x '())) (let ((y (cons a x))) (let ((z (cons a y))) (ref-eq y 1) (ref-eq z 1) (ref-eq (head y) 3) (ref-eq (head z) 3)))))) #t)
+  (check-equal? (execute (compile `(let ((a 2) (x '())) (let ((y (cons a x))) (let ((z (cons a y))) (ref-eq y 1) (ref-eq z 1) (ref-eq (first y) 3) (ref-eq (first z) 3)))))) #t)
   )
 
   

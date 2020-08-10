@@ -9,6 +9,7 @@
 #define imm_shift (result_shift + 3)
 #define result_type_mask ((1 << result_shift) - 1)
 #define imm_type_mask ((1 << imm_shift) - 1)
+#define clear_tag 0xfffffffffffffff8
 
 #define type_imm 0b000
 #define type_box 0b001
@@ -359,6 +360,7 @@ void garbageCollect(int64_t ref) {
 	if(gc_info == true) {
 		printf("\n");
 	}
+	
 }
 
 /* Signal an error while executing the program */
