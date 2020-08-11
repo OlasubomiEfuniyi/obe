@@ -2557,17 +2557,35 @@ type Variable =
   (check-equal? (execute (compile `(set (set (box 5) 6) 7))) '#&7) 
 
 
-  ;;Test let reference count
+  ;;Test reference count
   (check-equal? (execute (compile `(let ((x (box 10))) (ref-eq x 1)
                                      (let ((y x) (z x)) (ref-eq x 3) (ref-eq y 3) (ref-eq z 3))))) #t)
   (check-equal? (execute (compile `(let () (ref-eq (let ((y 5)) (ref-eq y 1) y) 0) (ref-eq (let ((y 5)) (ref-eq y 1) y) 0)))) #t)
   (check-equal? (execute (compile `(let ((x 10)) (add x (let () (ref-eq x 2) 2))))) 12)
   (check-equal? (execute (compile `(let ((x 10) (y 11)) (add x (add y (let ((z y)) (ref-eq y 3) (ref-eq x 2) 0)))))) 21)
-
-  ;;Test list reference count
   (check-equal? (execute (compile `(ref-eq (cons 1 '()) 0))) #t)
   (check-equal? (execute (compile `(let ((a 2) (x '())) (let ((y (cons a x))) (let ((z (cons a y))) (ref-eq y 1) (ref-eq z 1) (ref-eq (head y) 3) (ref-eq (head z) 3)))))) #t)
   (check-equal? (execute (compile `(let ((a 2) (x '())) (let ((y (cons a x))) (let ((z (cons a y))) (ref-eq y 1) (ref-eq z 1) (ref-eq (first y) 3) (ref-eq (first z) 3)))))) #t)
+  (check-equal? (execute (compile `(let ((b (box '(1 2 3)))) (ref-eq b 1) (ref-eq (unbox b) 1) (let ((c (unbox b))) (ref-eq c 2)) (ref-eq b 1) (let ((d b)
+                                                                                                                                        (e (unbox b))
+                                                                                                                                        (f (unbox b))) (ref-eq b 2) (ref-eq d 2) (ref-eq (unbox b) 3) (ref-eq (unbox d) 3))))) #t)
+  (check-equal? (execute (compile `(let ((b (box 3)) (a 1)) (ref-eq (unbox b) 1) (set b a) (ref-eq (unbox b) 2)))) #t)
+  (check-equal? (execute (compile `(for x in (.. 1 5 1) do
+                                     (if (= x 1)
+                                         (ref-eq x 2)
+                                         (ref-eq x 1))))) #t)
+  (check-equal? (execute (compile `(for x in (..= 1 5 1) do
+                                     (let ((v (..= x 5 1)))
+                                       (ref-eq v 1)
+                                       (for t in v do
+                                         (if (= t 1)
+                                             (ref-eq t 4)
+                                             (if (= t x)
+                                                 (ref-eq t 3)
+                                                 (ref-eq t 1)))))))) #t)
+  (check-equal? (execute (compile `(let ((lst '(1 2 3))) (let ((h t lst)) (ref-eq h 2) (ref-eq t 2) (let ((h t t)) (ref-eq h 2) (ref-eq t 2) (let ((h t t)) (ref-eq h 2) (= t '()))))))) #t)
+  (check-equal? (execute (compile `(let ((pair (cons 1 (cons 2 (cons 3 4))))) (let ((f s pair)) (ref-eq f 2) (ref-eq s 2) (let ((f s s)) (ref-eq f 2) (ref-eq s 2) (let ((f s s)) (ref-eq f 2) (ref-eq s 2) (= s 4))))))) #t)
+  (check-equal? (execute (compile `(let ((x 3)) (ref-eq (let ((y x)) (ref-eq x 2) (ref-eq y 2) (for z in (.. y (add 1 y)) do) x) 1)))) #t)
   )
 
   

@@ -362,7 +362,8 @@ int64_t compValue(int64_t value1, int64_t value2) {
 	}
 }
 
-void garbageCollect(int64_t ref) {
+/* Add some or all of the memory associated with ref to the free list */
+void garbageCollect(int64_t ref) {	
 	GC_INFO("About to garbage collect ");
 	if(gc_info == true) {
 		printValue(ref);
@@ -371,6 +372,43 @@ void garbageCollect(int64_t ref) {
 		printf("\n");
 	}
 	
+	switch(ref & result_type_mask) {
+		case type_bignum:
+		case type_list:
+		case type_pair:
+		case type_range:
+			{
+			int64_t* ref_p = (int64_t*) (ref ^ type_range);
+			//Decrement the reference count of the beginning of the range and possibly
+			//garbage collect it
+			int64_t* beginning = (ref_p + 1); //point to the 8 bytes within the range that holds a pointer to  the beginning of the range
+			*beginning = *beginning - 1; //decrement the ref count of the beginning of the range
+			printf("Beginning: %" PRId64 "\n", *beginning);
+			if(*beginning == 0) { //Check if the beginning of the range should also be gc
+				printf("Will garbage collect the beginning of the range\n");
+			} 
+
+			int64_t* end = (ref_p + 2); //point to the 8 bytes within the range that holds a pointer to the end of the range
+			*end =  *end - 1; //decrement the ref count of the end of the range
+			if(*end == 0) { //Check if the end of the range should also be gc
+				printf("Will garbage collect the end of the range\n");
+			}
+
+			int64_t* step = (ref_p + 3); //point to the 8 bytes within the range that holds a pointer to the end of the range
+			*step = *step - 1; //decrement the ref count  of the step value
+			if(*step == 0) { //Check if the step value should be gc
+				printf("Will garbage collect the step value\n");
+			}
+
+
+			//Add the 32 contiguous bytes that made up the range to the free list 
+			//TODO
+			}
+			break;
+		case type_box:
+		default:
+			runtimeSystemError();
+	}
 }
 
 /* Signal an error while executing the program */
