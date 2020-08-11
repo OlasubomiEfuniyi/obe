@@ -644,7 +644,7 @@ type Variable =
            ;;If the head value is a pointer to a chunk on the heap, the chunk's reference count should be incremented
            ;;because a new reference to it is being created. Same goes for the tail value
            (mov (offset rsp ,(- (+ 1 (length env) (length new-env)))) rax) ;;Save a pointer to the structure
-           (mov rax (offset rax 0))
+           (mov rax (offset rax 1))
            ,@(increment-ref-count post-incr-1)
            
            ,post-incr-1
@@ -653,7 +653,7 @@ type Variable =
            (mov (offset rsp ,(- (+ 1 (length env) (length new-env)))) rax) ;;Place the head value on the stack first
 
            (mov rax (offset rsp ,(- (+ 2 (length env) (length new-env))))) ;;Get the pointer to the structure
-           (mov rax (offset rax 1))
+           (mov rax (offset rax 2))
            ,@(increment-ref-count post-incr-2)
 
            ,post-incr-2
@@ -720,20 +720,71 @@ type Variable =
 
 ;;Compile the head operation
 (define (compile-head lst env)
-  (let ((c1 (compile-e lst env)))
+  (let ((c1 (compile-e lst env))
+        (stack-size (* 8 (+ 2 (length env))))
+        (continue1 (gensym "continue"))
+        (continue2 (gensym "continue"))
+        (continue3 (gensym "continue"))
+        (continue4 (gensym "continue")))
     `(,@c1
       ,@assert-list
+      ;;Increment the ref count of the list
+      ,@(increment-ref-count continue1)
+      ,continue1
+      ;;Save the list on the stack
+      (mov (offset rsp ,(- (add1 (length env)))) rax)
       (xor rax ,type-list);;Untag the pointer
-      (mov rax (offset rax 1)))))
+      (mov rax (offset rax 1))
+      ;;Temporarily increment the ref count of the head element
+      ;;to prevent possible garbage collection if the list is
+      ;;garbage collected
+      ,@(increment-ref-count continue2)
+      ,continue2
+      (mov (offset rsp ,(- (+ 2 (length env)))) rax) ;;Save the return value on the stack
+      ;;Decrement the ref count of the list, possibly garbage collecting it
+      (mov rax (offset rsp ,(- (add1 (length env)))))
+      ,@(decrement-ref-count continue3 stack-size #t)
+      ,continue3
+      ;;Decrment the ref count of the head, do not attempt to garbage collect
+      ;;since it is the return value
+      (mov rax (offset rsp ,(- (+ 2 (length env)))))
+      ,@(decrement-ref-count continue4 stack-size #f)
+      ,continue4)))
 
 
 ;;Compile the tail operation
+;;Expr CEnv -> ASM
 (define (compile-tail lst env)
-  (let ((c1 (compile-e lst env)))
+  (let ((c1 (compile-e lst env))
+        (stack-size (* 8 (+ 2 (length env))))
+        (continue1 (gensym "continue"))
+        (continue2 (gensym "continue"))
+        (continue3 (gensym "continue"))
+        (continue4 (gensym "continue")))
     `(,@c1
       ,@assert-list
+      ;;Increment the ref count of the list
+      ,@(increment-ref-count continue1)
+      ,continue1
+      ;;Save the list on the stack
+      (mov (offset rsp ,(- (add1 (length env)))) rax)
       (xor rax ,type-list);;Untag the pointer
-      (mov rax (offset rax 2)))))
+      (mov rax (offset rax 2))
+      ;;Temporarily increment the ref count of the tail
+      ;;to prevent possible garbage collection if the list is
+      ;;garbage collected
+      ,@(increment-ref-count continue2)
+      ,continue2
+      (mov (offset rsp ,(- (+ 2 (length env)))) rax) ;;Save the return value on the stack
+      ;;Decrement the ref count of the list, possibly garbage collecting it
+      (mov rax (offset rsp ,(- (add1 (length env)))))
+      ,@(decrement-ref-count continue3 stack-size #t)
+      ,continue3
+      ;;Decrement the ref count of the tail, do not attempt to garbage collect
+      ;;since it is the return value
+      (mov rax (offset rsp ,(- (+ 2 (length env)))))
+      ,@(decrement-ref-count continue4 stack-size #f)
+      ,continue4)))
 
 
 
@@ -934,13 +985,21 @@ type Variable =
       ,continue3
       (xor rax ,type-bignum) ;;Untag the pointer to the bignum
       (mov (offset rsp ,(- (+ 3 (length env)))) rax) ;;save the step value on the stack
+
+      ;;;;;;;;;;;;;;;;Make sure the step value is positive;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+      (mov (offset rsp ,(- (+ 4 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 5 (length env)))) rsi)
+      (mov rdi rax)
+      (mov rsi 1)
+      (sub rsp ,stack-size)
+      (call compBignumSI)
+      (add rsp ,stack-size)
+      (cmp rax 0)
+      (jl err)
       
       ;;;;;;;;;;;;;Make sure the starting point is strictly less than the ending point usig compBignum;;;;;;;;;;;;;;;
 
       ;;Prep for call to compBignum
-      (mov (offset rsp ,(- (+ 4 (length env)))) rdi)
-      (mov (offset rsp ,(- (+ 5 (length env)))) rsi)
-
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;pass the starting point of the range in rdi
       (mov rsi (offset rsp ,(- (+ 2 (length env))))) ;;pass the ending point of the range in rsi
 
@@ -1049,13 +1108,21 @@ type Variable =
       ,continue3
       (xor rax ,type-bignum) ;;Untag the pointer to the bignum
       (mov (offset rsp ,(- (+ 3 (length env)))) rax) ;;save the step value of the range on the stack
+
+      ;;;;;;;;;;;;;;;;Make sure the step value is positive;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+      (mov (offset rsp ,(- (+ 4 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 5 (length env)))) rsi)
+      (mov rdi rax)
+      (mov rsi 1)
+      (sub rsp ,stack-size)
+      (call compBignumSI)
+      (add rsp ,stack-size)
+      (cmp rax 0)
+      (jl err)
       
       ;;;;;;;;;;;;;Make sure the starting point is less than or equal to the ending point usig compBignum;;;;;;;;;;;;;;;
 
       ;;Prep for call to compBignum
-      (mov (offset rsp ,(- (+ 4 (length env)))) rdi)
-      (mov (offset rsp ,(- (+ 5 (length env)))) rsi)
-
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;pass the starting point of the range in rdi
       (mov rsi (offset rsp ,(- (+ 2 (length env))))) ;;pass the ending point of the range in rsi
 
@@ -2200,11 +2267,9 @@ type Variable =
       )))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Tests;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (module+ test
-  ;;Test integers
-  #|(check-equal? (execute (compile 5)) 5)
-  (check-equal? (execute (compile -5)) -5)
-  
   ;;Test bignum
+  (check-equal? (execute (compile 5)) 5)
+  (check-equal? (execute (compile -5)) -5)
   (check-equal? (execute (compile 9223372036854775807)) 9223372036854775807)
   (check-equal? (execute (compile -9223372036854775807)) -9223372036854775807)
 
@@ -2429,30 +2494,30 @@ type Variable =
   (check-equal? (execute (compile `(let ((x 1) (y 1) (z 2)) (= x z)))) #f)
 
   ;;Test Range ..
-  (check-equal? (execute (compile `(.. 5 6))) `(5..=5))
-  (check-equal? (execute (compile `(.. (add 1 0) (add 1 2)))) `(1..=2))
-  (check-equal? (execute (compile `(.. (add 1 (sub 5 6)) 8))) `(0..=7))
+  (check-equal? (execute (compile `(.. 5 6))) `(5..=5 1))
+  (check-equal? (execute (compile `(.. (add 1 0) (add 1 2)))) `(1..=2 1))
+  (check-equal? (execute (compile `(.. (add 1 (sub 5 6)) 8 2))) `(0..=7 2))
   (check-equal? (execute (compile `(.. '(1 2 3) 5))) 'err)
   (check-equal? (execute (compile `(.. 5 '(1 2 3)))) 'err)
   (check-equal? (execute (compile `(.. '(1 2 3) '()))) 'err)
   (check-equal? (execute (compile `(.. 5 4))) 'err)
   (check-equal? (execute (compile `(.. 5 5))) 'err)
   (check-equal? (execute (compile `(.. (add 1 (add 2 3)) (add 1 (add 2 2))))) 'err)
-  (check-equal? (execute (compile `(.. (if #t 100 #f) (let ((x 7)) (add x 100))))) '(100..=106))
-  (check-equal? (execute (compile `(.. (head '(1 2 3)) 5))) '(1..=4))
+  (check-equal? (execute (compile `(.. (if #t 100 #f) (let ((x 7)) (add x 100)) (add 1 2)))) '(100..=106 3))
+  (check-equal? (execute (compile `(.. (head '(1 2 3)) 5))) '(1..=4 1))
 
   ;;Test Range ..=
-  (check-equal? (execute (compile `(..= 5 6))) `(5..=6))
-  (check-equal? (execute (compile `(..= (add 1 0) (add 1 2)))) `(1..=3))
-  (check-equal? (execute (compile `(..= (add 1 (sub 5 6)) 8))) `(0..=8))
+  (check-equal? (execute (compile `(..= 5 6))) `(5..=6 1))
+  (check-equal? (execute (compile `(..= (add 1 0) (add 1 2) 20))) `(1..=3 20))
+  (check-equal? (execute (compile `(..= (add 1 (sub 5 6)) 8 -1))) 'err)
   (check-equal? (execute (compile `(..= '(1 2 3) 5))) 'err)
   (check-equal? (execute (compile `(..= 5 '(1 2 3)))) 'err)
   (check-equal? (execute (compile `(..= '(1 2 3) '()))) 'err)
   (check-equal? (execute (compile `(..= 5 4))) 'err)
-  (check-equal? (execute (compile `(..= 5 5))) '(5..=5))
+  (check-equal? (execute (compile `(..= 5 5))) '(5..=5 1))
   (check-equal? (execute (compile `(..= (add 1 (add 2 3)) (add 1 (add 2 2))))) 'err)
-  (check-equal? (execute (compile `(..= (if #t 100 #f) (let ((x 7)) (add x 100))))) '(100..=107))
-  (check-equal? (execute (compile `(..= (head '(1 2 3)) 5))) '(1..=5))
+  (check-equal? (execute (compile `(..= (if #t 100 #f) (let ((x 7)) (add x 100)) (add 1 5)))) '(100..=107 6))
+  (check-equal? (execute (compile `(..= (head '(1 2 3)) 5))) '(1..=5 1))
 
   ;;Test println
   (check-equal? (execute (compile `(println 5))) '(5 #t))
@@ -2476,20 +2541,20 @@ type Variable =
   (check-equal? (execute (compile `(box (box 5)))) '#&#&5)
   (check-equal? (execute (compile `(box (cons 1 2)))) '#&(1 . 2))
   (check-equal? (execute (compile `(box (add 0 #t)))) 'err)
-  (check-equal? (execute (compile `(box (.. 1 3)))) '#&(1..=2))
+  (check-equal? (execute (compile `(box (.. 1 3)))) '#&(1..=2 1))
 
   ;; Test unbox
   (check-equal? (execute (compile `(unbox (box 5)))) '5)
   (check-equal? (execute (compile `(unbox (box (box 5))))) '#&5)
   (check-equal? (execute (compile `(unbox (box (cons 1 2))))) '(1 . 2))
   (check-equal? (execute (compile `(unbox (box (add 0 #t))))) 'err)
-  (check-equal? (execute (compile `(unbox (box (.. 1 3))))) '(1..=2))
+  (check-equal? (execute (compile `(unbox (box (.. 1 3))))) '(1..=2 1))
 
   ;; Test set
   (check-equal? (execute (compile `(set (box 5) 6))) '#&6)
   (check-equal? (execute (compile `(set (box 5) #t))) '#&#t)
   (check-equal? (execute (compile `(set 6 (box 5)))) 'err)
-  (check-equal? (execute (compile `(set (set (box 5) 6) 7))) '#&7) |#
+  (check-equal? (execute (compile `(set (set (box 5) 6) 7))) '#&7) 
 
 
   ;;Test let reference count

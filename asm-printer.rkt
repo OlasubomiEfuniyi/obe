@@ -74,7 +74,7 @@ type Register
 (define (assembly compiled-prog)
   (string-append "\tglobal entry\n \textern nomem\n \textern error\n \textern compileBignum\n \textern addBignum\n \textern subBignum\n \textern rotateString\n \textern compBignum\n "
                  "\textern listEqual\n \textern pairEqual\n \textern my_mpz_init\n \textern my_mpz_add\n \textern my_mpz_sub\n \textern printResult\n \textern decrement\n \textern increment\n"
-                 "\textern garbageCollect\n \tsection .text\n entry:\n \tpush rbp\n \tmov rbp, rsp\n \tpush rbx\n \tpush rdi\n \tpush rsi\n \tpush r12\n "
+                 "\textern garbageCollect\n \textern compBignumSI\n \tsection .text\n entry:\n \tpush rbp\n \tmov rbp, rsp\n \tpush rbx\n \tpush rdi\n \tpush rsi\n \tpush r12\n "
                  "\tpush r13\n \tpush r14\n \tpush r15\n" (asm->assembly compiled-prog)))
 
 ;;Conver a list of ASM to assembly strin

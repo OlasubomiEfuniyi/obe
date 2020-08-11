@@ -141,7 +141,17 @@ int64_t compBignum(int64_t arg0, int64_t arg1) {
 	int64_t* argument0 = (int64_t *)arg0;
 	int64_t* argument1 = (int64_t *)arg1;
 
-	int comp_res =  mpz_cmp(*((mpz_t*)(argument0 + 1)), *((mpz_t*)(argument1 + 1)));
+	int64_t comp_res =  mpz_cmp(*((mpz_t*)(argument0 + 1)), *((mpz_t*)(argument1 + 1)));
+	return comp_res;
+}
+
+/* Compare a bignum with a signed integer */
+int64_t compBignumSI(int64_t arg0, int64_t arg1) {
+	/* Return the result of comparing the bignum with the signed integer using the mpz_cmp_si function from the 
+	GMP library */
+	int64_t* argument0 = (int64_t*)arg0;
+
+	int64_t comp_res = mpz_cmp_si(*((mpz_t *)(argument0 + 1)), arg1);
 	return comp_res;
 }
 
@@ -233,7 +243,7 @@ void printValue(int64_t value) {
 		printBignum(*addr);
 		printf("..=");
 		printBignum(*(addr + 1));
-		printf(";");
+		printf(" ");
 		printBignum(*(addr + 2));
 		printf(")");
 		break;
