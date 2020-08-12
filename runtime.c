@@ -37,6 +37,8 @@ void printList(int64_t value);
 void printPair(int64_t value);
 int64_t compValue(int64_t value1, int64_t value2);
 int comBignum(int64_t arg0, int64_t arg1);
+void garbageCollect(int64_t ref);
+void decrementRefCount(int64_t ref);
 int error(void);
 int runtimeSystemError(void);
 
@@ -367,52 +369,103 @@ void garbageCollect(int64_t ref) {
 	GC_INFO("About to garbage collect ");
 	if(gc_info == true) {
 		printValue(ref);
-	}
-	if(gc_info == true) {
 		printf("\n");
 	}
 	
 	switch(ref & result_type_mask) {
 		case type_bignum:
+			//Bignums do not have inner chunks so there is no need to attempt to recursively garbage collect
+			//TODO: Place the 24 bytes used by the bignum back on the free list
 			break;
 		case type_list:
+			{
+			int64_t* ref_p = (int64_t*) (ref ^ type_list); //Get pointer to the ref count of the list
+			int64_t head = *(ref_p + 1); //get tagged pointer to the head of the list
+			decrementRefCount(head);
+			int64_t tail = *(ref_p + 2); //get tagged pointer to the tail of the list
+			decrementRefCount(tail);
+			//TODO: Place the 24 bytes used by the cons back on the free list
+			}
 			break;
 		case type_pair:
+			{
+			int64_t* ref_p = (int64_t*) (ref ^ type_pair); //Get pointer to the ref count of the pair
+			int64_t first = *(ref_p + 1); //get tagged pointer to the first of the pair
+			decrementRefCount(first);
+			int64_t second = *(ref_p + 2); //get tagged pointer to the second of the pair
+			decrementRefCount(second);
+			//TODO: Place the 24 bytes used by the cons back on the free list
+			}
 			break;
 		case type_range:
 			{
 			int64_t* ref_p = (int64_t*) (ref ^ type_range);
-			//Decrement the reference count of the beginning of the range and possibly
-			//garbage collect it
-			int64_t* beginning = (int64_t*) (*(ref_p + 1) ^ type_bignum); //point to the 8 bytes within the range that holds a pointer to  the beginning of the range
+			
+			int64_t beginning = *(ref_p + 1); //get the tagged pointer to the beginning of the range
+			decrementRefCount(beginning);
 
-			*beginning = *beginning - 1; //decrement the ref count of the beginning of the range
-			if(*beginning == 0) { //Check if the beginning of the range should also be gc
-				GC_INFO("Will garbage collect the beginning of the range\n");
-			} 
-
-			int64_t* end = (int64_t*) (*(ref_p + 2) ^ type_bignum); //point to the 8 bytes within the range that holds a pointer to the end of the range
-			*end =  *end - 1; //decrement the ref count of the end of the range
-			if(*end == 0) { //Check if the end of the range should also be gc
-				GC_INFO("Will garbage collect the end of the range\n");
-			}
-
-			int64_t* step = (int64_t*) (*(ref_p + 3) ^ type_bignum); //point to the 8 bytes within the range that holds a pointer to the end of the range
-			*step = *step - 1; //decrement the ref count  of the step value
-			if(*step == 0) { //Check if the step value should be gc
-				GC_INFO("Will garbage collect the step value\n");
-			}
-
-
-			//Add the 32 contiguous bytes that made up the range to the free list 
-			//TODO
+			int64_t end = *(ref_p + 2); //get the tagged pointer to the end of the range
+			decrementRefCount(end);
+						
+			int64_t step = *(ref_p + 3); //get the tagged pointer to the step value of the range
+			decrementRefCount(step);
+			//TODO:Add the 32 contiguous bytes that made up the range to the free list 
 			}
 			break;
 		case type_box:
+			{
+			int64_t* ref_p = (int64_t*) (ref ^ type_box);
+			
+			int64_t value = *(ref_p + 1); //get the tagged pointer to the value in the box
+			decrementRefCount(value);
+			//TODO:Add the 16 contiguous bytes that made up the box to the free list
+			}
 			break;
 		default:
 			runtimeSystemError();
 	}
+}
+
+void decrementRefCount(int64_t ref) {
+	int64_t type = -1; //Assum by defualt that ref is an immediate value;
+	switch(ref & result_type_mask) {
+		case type_bignum:
+			type = type_bignum;
+			break;
+		case type_list:
+			type = type_list;
+			break;
+		case type_pair:
+			type = type_pair;
+			break;
+		case type_range:
+			type = type_range;
+			break;
+		case type_box:
+			type = type_box;
+			break;
+		default:
+			break;
+
+	}
+	
+	
+	//Since all chunks have their reference count as their first 8 bytes,
+	//they can share the same code for decrementing their ref count
+	//and possibly triggering garbage collection.
+	if(type != -1) { //Check that ref is a pointer to a chunk
+		int64_t* ref_p = (int64_t*) (ref ^ type);
+		*ref_p = *ref_p - 1; //Decrement the ref count of the chunk
+		if(*ref_p == 0) {
+			GC_INFO("Will garbage collect: ");
+			if(gc_info == true) {
+				printValue(ref);
+				printf("\n");
+			}
+			garbageCollect(ref);
+		}
+	}
+
 }
 
 /* Signal an error while executing the program */
