@@ -2223,9 +2223,7 @@ type Variable =
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Language features used for testing purposes;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Expr integer CEnv-> ASM
 (define (compile-ref-eq chunk integer env)
-  (let ((end (gensym "end"))
-        (false (gensym "false"))
-        (stack-size (* 8 (+ 1 (length env))))
+  (let ((stack-size (* 8 (+ 1 (length env))))
         (continue1 (gensym "continue"))
         (continue2 (gensym "continue")))
     `(,@(compile-e chunk env)
@@ -2248,13 +2246,9 @@ type Variable =
       (mov rbx ,integer)
       (sub rax 1) ;;Not considering the reference this function has to the chunk
       (cmp rax rbx)
-      (jne ,false)
+      (jne err)
       (mov rax ,type-true)
-      (jmp ,end)
-      ,false
-      (mov rax ,type-false)
 
-      ,end
       (mov rbx rax)
       (mov rax (offset rsp ,(- (add1 (length env))))) ;;Get the tagged chunk into rax
       (mov (offset rsp ,(- (add1 (length env)))) rbx) ;;Save the return value on the stack
@@ -2585,8 +2579,19 @@ type Variable =
                                                  (ref-eq t 1)))))))) #t)
   (check-equal? (execute (compile `(let ((lst '(1 2 3))) (let ((h t lst)) (ref-eq h 2) (ref-eq t 2) (let ((h t t)) (ref-eq h 2) (ref-eq t 2) (let ((h t t)) (ref-eq h 2) (= t '()))))))) #t)
   (check-equal? (execute (compile `(let ((pair (cons 1 (cons 2 (cons 3 4))))) (let ((f s pair)) (ref-eq f 2) (ref-eq s 2) (let ((f s s)) (ref-eq f 2) (ref-eq s 2) (let ((f s s)) (ref-eq f 2) (ref-eq s 2) (= s 4))))))) #t)
-  (check-equal? (execute (compile `(let ((x 3)) (ref-eq (let ((y x)) (ref-eq x 2) (ref-eq y 2) (for z in (.. y (add 1 y)) do) x) 1)))) #t)
-  )
+
+  ;;Test GC reduces ref count of inner chunks that are referenced by the chunk being garbage collected
+  (check-equal? (execute (compile `(let ((x 3)) (ref-eq (let ((y x)) (ref-eq x 2) (ref-eq y 2) (for z in (.. y (add 1 y)) do 0) x) 1)))) #t)
+  (check-equal? (execute (compile `(let ((x 1)) (let ((y (..= x 5))) (ref-eq x 2) y) (ref-eq x 1)))) #t)
+  (check-equal? (execute (compile `(let ((a 5) (b 6) (c (cons 7 '()))) (let ((lst (cons a (cons b c)))) (ref-eq lst 1) (ref-eq (head lst) 2) (ref-eq a 2)
+                                                                         (ref-eq (head (tail lst)) 2) (ref-eq b 2)
+                                                                         (ref-eq (tail (tail lst)) 2) (ref-eq c 2))
+                                     (ref-eq a 1) (ref-eq b 1) (ref-eq c 1) (ref-eq (head c) 1)))) #t)
+  (check-equal? (execute (compile `(let ((a 5) (b 6) (c (cons 7 8))) (let ((lst (cons a (cons b c)))) (ref-eq lst 1) (ref-eq (first lst) 2) (ref-eq a 2)
+                                                                         (ref-eq (first (second lst)) 2) (ref-eq b 2)
+                                                                         (ref-eq (second (second lst)) 2) (ref-eq c 2))
+                                     (ref-eq a 1) (ref-eq b 1) (ref-eq c 1) (ref-eq (first c) 1)))) #t)
+  (check-equal? (execute (compile `(let ((a 6)) (let ((b (box a))) (ref-eq (unbox b) 2) (ref-eq a 2) 7) (ref-eq a 1)))) #t))
 
   
 
