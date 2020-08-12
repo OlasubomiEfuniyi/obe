@@ -1,46 +1,14 @@
-#include <stdio.h>
-#include <inttypes.h>
-#include <stdlib.h>
-#include <gmp.h>
-#include <assert.h>
-#include <string.h>
+/* This file contains code for starting the program, printing its results and pefroming some routines required by the running program */
+#include "runtime.h"
 
-#define result_shift 3
-#define imm_shift (result_shift + 3)
-#define result_type_mask ((1 << result_shift) - 1)
-#define imm_type_mask ((1 << imm_shift) - 1)
-#define clear_tag 0xfffffffffffffff8
-
-#define type_imm 0b000
-#define type_box 0b001
-#define type_bignum 0b010
-#define type_list  0b011
-#define type_pair 0b100
-#define type_range 0b101
-
-#define type_true ((0b000 << result_shift))
-#define type_false ((0b001 << result_shift))
-#define type_empty_list ((0b010 << result_shift))
-
-#define heap_size 8000000000
-
-#define true 1
-#define false 0
-#define GC_INFO(...) (gc_info && printf(__VA_ARGS__))
- 
-typedef char bool;
 int64_t entry(void* heap, void* heap_start_addr, int64_t h_size);
 void printResult(int64_t value);
 void printBignum(int64_t value);
-void printValue(int64_t value);
 void printList(int64_t value);
 void printPair(int64_t value);
 int64_t compValue(int64_t value1, int64_t value2);
 int comBignum(int64_t arg0, int64_t arg1);
-void garbageCollect(int64_t ref);
-void decrementRefCount(int64_t ref);
 int error(void);
-int runtimeSystemError(void);
 
 bool gc_info = false; //Set to true if garbage collection  information should be printed with chunks and upon triggering garbage collection. false otherwise.
 
@@ -65,6 +33,11 @@ int main(int argc, char** argv) {
 	int64_t  value = entry(heap, heap, heap_size);
 	
 	printResult(value);
+
+	GC_INFO("Free List:\n");
+	if(gc_info == true) {
+		printFreeList();
+	}
 	
 	free(heap);
 	return 0;
@@ -364,110 +337,6 @@ int64_t compValue(int64_t value1, int64_t value2) {
 	}
 }
 
-/* Add some or all of the memory associated with ref to the free list */
-void garbageCollect(int64_t ref) {	
-	GC_INFO("About to garbage collect ");
-	if(gc_info == true) {
-		printValue(ref);
-		printf("\n");
-	}
-	
-	switch(ref & result_type_mask) {
-		case type_bignum:
-			//Bignums do not have inner chunks so there is no need to attempt to recursively garbage collect
-			//TODO: Place the 24 bytes used by the bignum back on the free list
-			break;
-		case type_list:
-			{
-			int64_t* ref_p = (int64_t*) (ref ^ type_list); //Get pointer to the ref count of the list
-			int64_t head = *(ref_p + 1); //get tagged pointer to the head of the list
-			decrementRefCount(head);
-			int64_t tail = *(ref_p + 2); //get tagged pointer to the tail of the list
-			decrementRefCount(tail);
-			//TODO: Place the 24 bytes used by the cons back on the free list
-			}
-			break;
-		case type_pair:
-			{
-			int64_t* ref_p = (int64_t*) (ref ^ type_pair); //Get pointer to the ref count of the pair
-			int64_t first = *(ref_p + 1); //get tagged pointer to the first of the pair
-			decrementRefCount(first);
-			int64_t second = *(ref_p + 2); //get tagged pointer to the second of the pair
-			decrementRefCount(second);
-			//TODO: Place the 24 bytes used by the cons back on the free list
-			}
-			break;
-		case type_range:
-			{
-			int64_t* ref_p = (int64_t*) (ref ^ type_range);
-			
-			int64_t beginning = *(ref_p + 1); //get the tagged pointer to the beginning of the range
-			decrementRefCount(beginning);
-
-			int64_t end = *(ref_p + 2); //get the tagged pointer to the end of the range
-			decrementRefCount(end);
-						
-			int64_t step = *(ref_p + 3); //get the tagged pointer to the step value of the range
-			decrementRefCount(step);
-			//TODO:Add the 32 contiguous bytes that made up the range to the free list 
-			}
-			break;
-		case type_box:
-			{
-			int64_t* ref_p = (int64_t*) (ref ^ type_box);
-			
-			int64_t value = *(ref_p + 1); //get the tagged pointer to the value in the box
-			decrementRefCount(value);
-			//TODO:Add the 16 contiguous bytes that made up the box to the free list
-			}
-			break;
-		default:
-			runtimeSystemError();
-	}
-}
-
-void decrementRefCount(int64_t ref) {
-	int64_t type = -1; //Assum by defualt that ref is an immediate value;
-	switch(ref & result_type_mask) {
-		case type_bignum:
-			type = type_bignum;
-			break;
-		case type_list:
-			type = type_list;
-			break;
-		case type_pair:
-			type = type_pair;
-			break;
-		case type_range:
-			type = type_range;
-			break;
-		case type_box:
-			type = type_box;
-			break;
-		default:
-			break;
-
-	}
-	
-	
-	//Since all chunks have their reference count as their first 8 bytes,
-	//they can share the same code for decrementing their ref count
-	//and possibly triggering garbage collection.
-	if(type != -1) { //Check that ref is a pointer to a chunk
-		int64_t* ref_p = (int64_t*) (ref ^ type);
-		*ref_p = *ref_p - 1; //Decrement the ref count of the chunk
-		if(*ref_p == 0) {
-			GC_INFO("Will garbage collect: ");
-			if(gc_info == true) {
-				printValue(ref);
-				printf("\n");
-			}
-			garbageCollect(ref);
-		}
-	}
-
-}
-
 /* Signal an error while executing the program */
 int error() {
 	printf("err\n");
@@ -484,3 +353,4 @@ int nomem() {
 int runtimeSystemError(void) {
 	exit(1);
 }
+

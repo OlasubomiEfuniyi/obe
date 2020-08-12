@@ -15,12 +15,16 @@
 
 # Use gcc to link the program's .o file with the runtime system. -lgmp is for 
 # the gmp library
-%.run: %.o runtime.o
-	gcc runtime.o $< -o $@ -lgmp
+%.run: %.o runtime.o gc.o
+	gcc gc.o runtime.o $< -o $@ -lgmp
 
 # Use gcc to creat a linkable object format of the runtime system
 runtime.o: runtime.c
-	gcc -c runtime.c -o runtime.o
+	gcc -c -g runtime.c -o runtime.o
+
+# Use gcc to create a linkable object format of the garbage collector
+gc.o: gc.c
+	gcc -c -g gc.c -o gc.o
  
 # The - instructs make to continue even though a particular command fails. 
 clean:
