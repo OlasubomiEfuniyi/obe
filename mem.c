@@ -2,6 +2,7 @@
 #include <inttypes.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <assert.h>
 #include "mem.h"
 
 void memError(const char* msg);
@@ -31,6 +32,7 @@ int64_t* init_heap() {
 
 /* Allocate space on the heap for a chunk of the given size */
 int64_t allocateChunk(short size) {
+	assert((size % 8)  == 0); //Make sure the addresses are kept as multiple of 8 bytes
 	int64_t chunk = 0;
 
 	//Determine if there is enough space between the next free position on the heap
@@ -69,6 +71,7 @@ int64_t allocateChunk(short size) {
 		}
 	}
 
+	
 	return chunk;
 }
 

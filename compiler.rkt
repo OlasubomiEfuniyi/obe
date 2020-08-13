@@ -471,7 +471,7 @@ type Variable =
       ,@(increment-ref-count continue1)
       ,continue1
       ,@assert-range
-      (mov (offset rsp ,(- (+ 5 (length env)))) rax) ;;Save a tagged reference to the range so that the reference count can be decremented at the end of the for loop
+      (mov (offset rsp ,(- (+ 6 (length env)))) rax) ;;Save a tagged reference to the range so that the reference count can be decremented at the end of the for loop
       
       (xor rax ,type-range) ;;Untag the pointer to the range for the work to be done
       
@@ -502,15 +502,15 @@ type Variable =
       ,loop
       
       ,@c-exprs ;;Execute the body of the loop
-      (mov (offset rsp ,(- (+ 3 (length env)))) rdi) ;;The body of the loop may have updated rdi
-      
       ;;Increment the bignum in rbx and compare it with the bignum in rax to determine when to stop
 
-      ;;Make sure that there is space on the heap for the reference count and the GMP struct that make up the bignum.
-      ;;At this point, rdi points to the next free position on the heap
-      ,@(assert-heap-offset 0) ;;For ref count
-      ,@(assert-heap-offset 1) ;;For first 8 bytes of GMP struct
-      ,@(assert-heap-offset 2) ;;For last 8 bytes of GMP struct
+      ;;Allocate space on the heap for the next value of v (24 bytes)
+      (mov rdi 24)
+      (sub rsp ,stack-size)
+      (call allocateChunk)
+      (add rsp ,stack-size)
+      (mov rdi rax)
+      (mov (offset rsp ,(- (+ 6 (length env)))) rdi) ;;Save the address of the bignum to be represented by v on the stack
       
       ;;Initialize the reference count of the bignum that will be placed on the stack by increment to 1 (not 0 since we are going to increment it anyways).
       ;;It is initialized to 1 because the for loop has a reference to it which it will loose and therefore
@@ -531,10 +531,6 @@ type Variable =
       (call increment)
       (add rsp ,stack-size) ;;Restore the stack
       
-      ;;Update the value of rdi as saved on the stack
-      (mov rdi (offset rsp ,(- (+ 3 (length env)))))
-      (add rdi 24)
-      (mov (offset rsp ,(- (+ 3 (length env)))) rdi)
       
       ;;Decrement the reference count of the old value of v, possibly causing it to be garbage collected
       (mov rax (offset rsp ,(- (add1 (length env)))))
@@ -542,8 +538,7 @@ type Variable =
       ,continue2
 
       ;;Place the new value of v on the stack
-      (mov rax (offset rsp ,(- (+ 3 (length env)))))
-      (sub rax 24)
+      (mov rax (offset rsp ,(- (+ 6 (length env)))))
       (or rax ,type-bignum)
       (mov (offset rsp ,(- (add1 (length env)))) rax)
       
@@ -556,12 +551,12 @@ type Variable =
       (call compBignum)
       (add rsp ,stack-size)
       
-      (mov rdi (offset rsp ,(- (+ 3 (length env)))));;Restore rdi
-      (mov rsi (offset rsp ,(- (+ 4 (length env)))));;Restore rsi
-      
       (cmp rax 0) ;;If the return value of compBignum is <= 0, then loop
       (jle ,loop)
 
+      (mov rdi (offset rsp ,(- (+ 3 (length env)))));;Restore rdi
+      (mov rsi (offset rsp ,(- (+ 4 (length env)))));;Restore rsi
+      
       ;;Decrement the reference count of the range
       (mov rax (offset rsp ,(- (+ 5 (length env)))))
       ,@(decrement-ref-count continue4 stack-size #t)
@@ -971,7 +966,8 @@ type Variable =
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
         (c3 (compile-e e3 (extend #f (extend #f env))))
-        (stack-size (* 8 (+ 5 (length env))))
+        (len (length env))
+        (stack-size (* 8 (+ 7 (length env))))
         (continue1 (gensym "continue"))
         (continue2 (gensym "continue"))
         (continue3 (gensym "continue"))
@@ -1003,7 +999,7 @@ type Variable =
       (mov (offset rsp ,(- (+ 3 (length env)))) rax) ;;save the step value on the stack
 
       ;;;;;;;;;;;;;;;;Make sure the step value is positive;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-      (mov (offset rsp ,(- (+ 4 (length env)))) rdi)
+      (mov (offset rsp ,(- (+ 6 (length env)))) rdi)
       (mov (offset rsp ,(- (+ 5 (length env)))) rsi)
       (mov rdi rax)
       (mov rsi 1)
@@ -1023,30 +1019,29 @@ type Variable =
       (call compBignum)
       (add rsp ,stack-size)
 
-      ;;Restore the registers used to pass arguments to compBignum
-      (mov rdi (offset rsp ,(- (+ 4 (length env)))))
-      (mov rsi (offset rsp ,(- (+ 5 (length env)))))
-
       ;;Use the result of compBignum to check that the starting point is strictly less than the ending point
       (cmp rax 0)
       (jge err) ;;If the return value is greater than or equal to 0, starting point is greater than or equal to ending point
 
 
       ;;Allocate the 32 bytes needed for the range as well as the 24 bytes needed for the decremented end of the range
-      ;;TODO: This, others below, and for
+      (mov (offset rsp ,(- (+ 6 (length env)))) rdi)
+      (mov rdi 32)
+      (sub rsp ,stack-size)
+      (call allocateChunk)
+      (add rsp ,stack-size)
+      (mov (offset rsp ,(- (+ 4 len))) rax) ;;Save the addres to the beginning of the range on the stack
+      (mov rdi 16)
+      (sub rsp ,stack-size)
+      (call allocateChunk)
+      (add rsp ,stack-size)
+      (mov (offset rsp ,(- (+ 7 len))) rax) ;;Save the address to the beginning of the end of the range on the stack
+      
       
       ;;;;;;;;;;;;;;;;;Decrement the end of the range before placing it on the heap;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-      (mov rax (offset rsp ,(- (+ 2 (length env)))))
+      (mov rdi (offset rsp ,(- (+ 2 (length env)))))
+      (mov rsi (offset rsp ,(- (+ 7 (length env)))))
       
-      ;;Prep for/call decrement
-      (mov (offset rsp ,(- (+ 4 (length env)))) rdi)
-      (mov (offset rsp ,(- (+ 5 (length env)))) rsi)
-      ;;Make sure the space that will be used to store the reference count and GMP struct is within the bounds of the heap
-      ,@(assert-heap-offset 0)
-      ,@(assert-heap-offset 1)
-      ,@(assert-heap-offset 2)
-      (mov rdi rax)
-      (mov rsi (offset rsp ,(- (+ 4 (length env)))))
       ;;Set the reference count of the new bignum to be made to 0
       (mov rbx 0)
       (mov (offset rsi 0) rbx)
@@ -1055,44 +1050,39 @@ type Variable =
       (call decrement)
 
       (add rsp ,stack-size) ;;Restore the stack
-      (mov rdi (offset rsp ,(- (+ 4 (length env))))) ;;Restore rdi
-      (mov rsi (offset rsp ,(- (+ 5 (length env))))) ;;Restore rsi
-
-      (add rdi 24) ;;Skip over the reference count and gmp struct for the decremented value on the heap
+      
 
       ;;Decrement the reference count of the initial ending bignum, possibly garbage collecting it
       (mov rax (offset rsp ,(- (+ 2 (length env)))))
       ,@(decrement-ref-count continue4 stack-size #t)
       ,continue4
       
-      ;;Create the range on the heap and return a pointer to it. 
-      ;;Place the beginning of the range on the heap
-      ,@(assert-heap-offset 0)
+      ;;Create the range on the heap and return a pointer to it.
+      (mov rdi (offset rsp ,(- (+ 4 len))))
+
       (mov rbx 0)
       (mov (offset rdi 0) rbx) ;;Set the reference count of this range to 0
       
       (mov rax (offset rsp ,(- (add1 (length env)))))
       (or rax ,type-bignum)
-      ,@(assert-heap-offset 1)
       (mov (offset rdi 1) rax)
       
       (mov rax (offset rsp ,(- (+ 4 (length env))))) ;;Get the pointer to the decremented bignum
       (or rax ,type-bignum) ;;Tag the bignum
       ,@(increment-ref-count continue5)
       ,continue5
-      ,@(assert-heap-offset 2)
       (mov (offset rdi 2) rax)
 
       ;;Place the step value after the start and end value on the heap
       (mov rax (offset rsp ,(- (+ 3 (length env)))))
       (or rax ,type-bignum)
-      ,@(assert-heap-offset 3)
       (mov (offset rdi 3) rax)
 
       (mov rax rdi)
       (or rax ,type-range)
-      (add rdi 32) ;;Make rdi point to the next free position on the heap
-      ,@assert-heap))) 
+      (mov rdi (offset rsp ,(- (+ 6 len)))) ;;Restore rdi
+      (mov rsi (offset rsp ,(- (+ 5 len)))) ;;Restore rsi
+      )))
       
 
 ;;Compile a range expression, starting from the first integer and including the last integer
@@ -1101,6 +1091,7 @@ type Variable =
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
         (c3 (compile-e e3 (extend #f (extend #f env))))
+        (len (length env))
         (stack-size (* 8 (+ 5 (length env))))
         (continue1 (gensym "continue"))
         (continue2 (gensym "continue"))
@@ -1150,38 +1141,38 @@ type Variable =
       (call compBignum)
       (add rsp ,stack-size)
 
-      ;;Restore the registers used to pass arguments to compBignum
-      (mov rdi (offset rsp ,(- (+ 4 (length env)))))
-      (mov rsi (offset rsp ,(- (+ 5 (length env)))))
-
       ;;Use the result of compBignum to check that the starting point is less than or equal to the ending point
       (cmp rax 0)
       (jg err) ;;If the return value is greater than or equal to 0, starting point is greater than or equal to ending point
 
 
-      ;;Create the range on the heap and return a pointer to it. Each pointer to a gmp struct is 16 bytes, keepind rdi a multiple of 8
-      ,@(assert-heap-offset 0)
+      ;;Allocate mememory on the heap for a range (32 bytes needed)
+      (mov rdi 32)
+      (sub rsp ,stack-size)
+      (call allocateChunk)
+      (add rsp ,stack-size)
+      (mov rdi rax)
+      
+      ;;Create the range on the heap and return a pointer to it.
       (mov rbx 0)
       (mov (offset rdi 0) rbx);; Initialize the reference count of this range to 0
       
       (mov rax (offset rsp ,(- (add1 (length env)))))
       (or rax ,type-bignum)
-      ,@(assert-heap-offset 1)
       (mov (offset rdi 1) rax)
       
       (mov rax (offset rsp ,(- (+ 2 (length env)))))
       (or rax ,type-bignum)
-      ,@(assert-heap-offset 2)
       (mov (offset rdi 2) rax)
       
       (mov rax (offset rsp ,(- (+ 3 (length env)))))
       (or rax ,type-bignum)
-      ,@(assert-heap-offset 3)
       (mov (offset rdi 3) rax)
 
       (mov rax rdi)
       (or rax ,type-range)
-      (add rdi 32)))) ;;Make rdi point to the next free position on the heap
+      (mov rdi (offset rsp ,(- (+ 4 len))));;Restore rdi
+      )))
        
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile Boolean;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1198,58 +1189,48 @@ type Variable =
 (define (compile-bignum num env)
   (let* (
          (num-string (number->string num))
+         ;;Plus one is accounting for the null character that will be placed at the end
          (len (+ (string-length num-string) 1)) ;;The number of bytes of characters to be used since each character is one byte
          (padding (get-padding len))
          ;;Pad the string representation of the number with enough null characters to keep the
          ;;heap at a 64 bit boundry
          (num-string-padded (string-append num-string padding))
+         (num-string-len (+ (string-length num-string-padded) 1))
          ;;Using the padded num-string ensures that rdi remains at an 8 byte boundary
          (num-list (string->list num-string-padded))
-         (stack-size (* 8 (+ 3 (length env)))))
+         (stack-size (* 8 (+ 4 (length env)))))
     `(
-      (mov (offset rsp ,(- (add1 (length env)))) rdi) ;;Save a pointer to the beginning of the string representation of the bignum
+      ;;Allocate space on the heap for the string representation of the bignum
+      (mov (offset rsp ,(- (+ 2 (length env)))) rdi) ;;Save whatever was initially in rdi
+      (mov rdi ,num-string-len) ;;Request num-string-len number of bytes. This is guaranteed to be a multiple of 8
+      (sub rsp ,stack-size)
+      (call allocateChunk)
+      (add rsp ,stack-size)
+      (mov rdi rax) ;;rdi now contains the address of the beginning of the string
+      
+      (mov (offset rsp ,(- (add1 (length env)))) rdi) ;;Save a pointer to the beginning of the string representation of the bignum to be freed later
+      
       ;;Compile the list of characters representing the number. Each character will take up one byte
-      ;;The first byte will containt the length of the list of characters
       ,@(compile-char-list num-list)
-      ,@(assert-heap-offset 0)
+
       ;;Null terminate the string
       (mov rbx 0)
       (mov (offset rdi 0) rbx)
-      (add rdi 1) ;;So that rdi points to the next free position on the heap, not the last character.
-                  ;;This finishes the addition to rdi started in compile-char-list, thereby maintaining
-                  ;;rdi as a multiple of 8 bytes.
       
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Call the C function to compile a bignum into a GMP struct;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-      ;;Save the values in the registers used to pass arguments. At this point, the last thing placed on the heap is the string representation of the
-      ;;bignum
-      (mov (offset rsp ,(- (+ 2 (length env)))) rdi)
-      (mov (offset rsp ,(- (+ 3 (length env)))) rsi)
+      (mov (offset rsp ,(- (+ 3 (length env)))) rsi) ;;Save whatever was initially in rsi
 
-      ;;Make sure that the addreses to be occupied by the GMP struct are within the heap's bounds
-      ;;If the string representation of the bignum successfully took up 24 bytes or more, then we definitely
-      ;;have enough space since the GMP struct and the reference count only need 24 bytes of space.
-      ;;Otherwise, It must have either taken up 8 bytes of space or 16 bytes of space. If it took up
-      ;;8 bytes of space, then we are sure of the first 8 bytes for the reference count. We still need
-      ;;to confirm that the remaining 16 bytes is available. If it took up 16 bytes of space, then we
-      ;;are sure of the first 8 bytes for the reference count and the first 8 bytes of the GMP struct. We
-      ;;need to confirm that the last 8 bytes for the GMP struct is available.
-      ,@(if (> len 16)
-            ;;Then the padded string must be 24 bytes or more
-            `()
-            (if (> len 8)
-                ;;Then the padded string is 16 bytes
-                (assert-heap-offset 0)
-
-                ;;Then the string is 8 bytes
-                `(,@(assert-heap-offset 0)
-                  ,@(assert-heap-offset 1))))
+      ;;Allocate space on the heap for the GMP struct (24 bytes)
+      (mov rdi 24)
+      (sub rsp ,stack-size)
+      (call allocateChunk)
+      (add rsp ,stack-size)
+      (mov (offset rsp ,(- (+ 4 (length env)))) rax) ;;Save address of the beginning of the bignum
       
       ;;Store arguments in the registers used to pass arguments to the function
+      (mov rsi (offset rsp ,(- (+ 4 (length env)))))
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;Pointer to the begining of the string rep of the bignum
-      (mov rsi (offset rsp ,(- (add1 (length env)))));;Pointer to the next available space on the heap where the GPM struct will go.
-                   ;;This is intentionally the same as the beginning of the string because once
-                   ;;we have read from it, we no longer need it and can overwrite its values. We
-                   ;;just have to make sure that the reading takes place before writing.
+  
       (add rsi 8) ;;Skip 8 bytes to leave space for the reference count
       
       ;;Setup the stack for the call
@@ -1260,22 +1241,24 @@ type Variable =
       ;;Restore the stack after the call
       (add rsp ,stack-size)
 
-      ;;Set the reference count ot 0. Cannot do this before compiling the bignum because it will overwrite the string
-      (mov rdi (offset rsp ,(- (add1 (length env)))))
+      ;;Set the reference count to 0.
+      (mov rdi (offset rsp ,(- (+ 4 (length env)))))
       (mov rbx 0)
       (mov (offset rdi 0) rbx)
+
+      ;;Free the memory used by the string rep of the bignum
+      (mov rdi (offset rsp ,(- (add1 (length env)))))
+      (mov rsi ,num-string-len)
+      (sub rsp ,stack-size)
+      (call addToFreeList)
+      (add rsp ,stack-size)
       
       ;;Restore the registers that were used to pass arguments
-      (mov rdi (offset rsp ,(- (+ 1 (length env))))) ;;rdi has now been reset to its position before the string representation of the num was placed on the heap
+      (mov rdi (offset rsp ,(- (+ 2 (length env))))) 
       (mov rsi (offset rsp ,(- (+ 3 (length env)))))
-
-      ;;Skip the reference count
-      (add rdi 8)
-      ;;make rdi point to the next avialable position on the heap by skipping the GMP struct
-      (add rdi rax)
       
-      ;;Tag the result as a gmp_struct
-      (mov rax (offset rsp ,(- (+ 1 (length env)))))
+      ;;Tag the result as a bignum
+      (mov rax (offset rsp ,(- (+ 4 (length env)))))
       (or rax ,type-bignum))))
 
 
@@ -1735,7 +1718,7 @@ type Variable =
 (define (compile-add e1 e2 env)
   (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
-        (stack-size (* 8 (+ 5 (length env))))
+        (stack-size (* 8 (+ 6 (length env))))
         (continue1 (gensym "continue"))
         (continue2 (gensym "continue"))
         (continue3 (gensym "continue"))
@@ -1765,17 +1748,19 @@ type Variable =
 
 
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Create the new GMP struct;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-      ;;Initialize the reference count of the new GMP struct to 0
-      ;;Make sure there is enough space on the heap
-      ,@(assert-heap-offset 0) ;;For reference count
-      ,@(assert-heap-offset 1) ;;For first half of GMP struct
-      ,@(assert-heap-offset 2) ;;For second half of GMP struct
+      ;;Allocate 24 bytes for the new GMP struct
+      (mov rdi 24)
+      (sub rsp ,stack-size)
+      (call allocateChunk)
+      (add rsp ,stack-size)
+      (mov rdi rax)
+      (mov (offset rsp ,(- (+ 6 (length env)))) rdi) ;;Save address to new GMP struct
       
+      ;;Set ref count of bignum to 0
       (mov rbx 0)
       (mov (offset rdi 0) rbx)
       (add rdi 8)
-      (mov (offset rsp ,(- (+ 3 (length env)))) rdi) ;;Update the saved value of rdi
-
+      
       ;;Setup for the gmp function calls required to add two bignums.
       ;;No need to do anything with rdi since it already contains the address of
       ;;the next free position on the heap
@@ -1786,7 +1771,8 @@ type Variable =
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Perform the addition;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       ;;add the two bignums and save the result in the newly initialized struct
       (add rsp ,stack-size) ;;Restore the stack to access the arguments for calling the addition function
-      (mov rdi (offset rsp ,(- (+ 3 (length env))))) ;;Untagged pointer to the new GMP struct
+      (mov rdi (offset rsp ,(- (+ 6 (length env))))) ;;Untagged pointer to the new GMP struct
+      (add rdi 8) ;;Skip ref count
       (mov rsi (offset rsp ,(- (add1 (length env))))) ;;Untagged pointer to the first bignum
       (mov rdx (offset rsp ,(- (+ 2 (length env))))) ;;Untagged pointer to the second bignum
 
@@ -1801,10 +1787,6 @@ type Variable =
       (mov rsi (offset rsp ,(- (+ 4 (length env)))))
       (mov rdx (offset rsp ,(- (+ 5 (length env)))))
 
-      ;;Set rdi to the next free position on the heap. Add 16 because an mpz_t has a
-      ;;size of 16 bytes. This may change in the future
-      (add rdi 16)
-
       ;;Decrement the reference counts of the arguments to add
       (mov rax (offset rsp ,(- (add1 (length env)))))
       (or rax ,type-bignum) ;;Because the argument was untagged before placing it on the stack
@@ -1816,16 +1798,15 @@ type Variable =
       ,continue4
       
       ;;Return a tagged pointer to the result on the heap
-      (mov rax (offset rsp ,(- (+ 3 (length env)))))
-      (sub rax 8) ;;Move 8 bytes down to include the reference count
+      (mov rax (offset rsp ,(- (+ 6 (length env)))))
       (or rax ,type-bignum))))
 
 ;;Compile the subtraction of two bignums
 ;;Expr Expr CEnv-> ASM
 (define (compile-sub e1 e2 env)
-    (let ((c1 (compile-e e1 env))
+  (let ((c1 (compile-e e1 env))
         (c2 (compile-e e2 (extend #f env)))
-        (stack-size (* 8 (+ 5 (length env))))
+        (stack-size (* 8 (+ 6 (length env))))
         (continue1 (gensym "continue"))
         (continue2 (gensym "continue"))
         (continue3 (gensym "continue"))
@@ -1855,17 +1836,19 @@ type Variable =
 
 
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Create the new GMP struct;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-      ;;Initialize the reference count of the new GMP struct to 0
-      ;;Make sure there is enough space on the heap
-      ,@(assert-heap-offset 0) ;;For reference count
-      ,@(assert-heap-offset 1) ;;For first half of GMP struct
-      ,@(assert-heap-offset 2) ;;For second half of GMP struct
+      ;;Allocate 24 bytes for the new GMP struct
+      (mov rdi 24)
+      (sub rsp ,stack-size)
+      (call allocateChunk)
+      (add rsp ,stack-size)
+      (mov rdi rax)
+      (mov (offset rsp ,(- (+ 6 (length env)))) rdi) ;;Save address to new GMP struct
       
+      ;;Set ref count of bignum to 0
       (mov rbx 0)
       (mov (offset rdi 0) rbx)
       (add rdi 8)
-      (mov (offset rsp ,(- (+ 3 (length env)))) rdi) ;;Update the saved value of rdi
-
+      
       ;;Setup for the gmp function calls required to add two bignums.
       ;;No need to do anything with rdi since it already contains the address of
       ;;the next free position on the heap
@@ -1876,7 +1859,8 @@ type Variable =
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Perform the addition;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       ;;add the two bignums and save the result in the newly initialized struct
       (add rsp ,stack-size) ;;Restore the stack to access the arguments for calling the addition function
-      (mov rdi (offset rsp ,(- (+ 3 (length env))))) ;;Untagged pointer to the new GMP struct
+      (mov rdi (offset rsp ,(- (+ 6 (length env))))) ;;Untagged pointer to the new GMP struct
+      (add rdi 8) ;;Skip ref count
       (mov rsi (offset rsp ,(- (add1 (length env))))) ;;Untagged pointer to the first bignum
       (mov rdx (offset rsp ,(- (+ 2 (length env))))) ;;Untagged pointer to the second bignum
 
@@ -1891,10 +1875,6 @@ type Variable =
       (mov rsi (offset rsp ,(- (+ 4 (length env)))))
       (mov rdx (offset rsp ,(- (+ 5 (length env)))))
 
-      ;;Set rdi to the next free position on the heap. Add 16 because an mpz_t has a
-      ;;size of 16 bytes. This may change in the future
-      (add rdi 16)
-
       ;;Decrement the reference counts of the arguments to add
       (mov rax (offset rsp ,(- (add1 (length env)))))
       (or rax ,type-bignum) ;;Because the argument was untagged before placing it on the stack
@@ -1906,8 +1886,7 @@ type Variable =
       ,continue4
       
       ;;Return a tagged pointer to the result on the heap
-      (mov rax (offset rsp ,(- (+ 3 (length env)))))
-      (sub rax 8) ;;Move 8 bytes down to include the reference count
+      (mov rax (offset rsp ,(- (+ 6 (length env)))))
       (or rax ,type-bignum))))
   
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Assertions;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1957,24 +1936,6 @@ type Variable =
       (cmp rbx ,type-list)
       (jne err)
       ,end)))
-
-;;A variable that holds ASM for determining if the heap pointer has exceeded the last
-;;available position on the heap
-(define assert-heap
-  `((mov rbx rdi)
-    (sub rbx (offset rsp -1)) ;;Find the difference between the current position on the heap and the beginning of the heap
-    (cmp rbx (offset rsp -2)) ;;Compare the difference to the size of the heap
-    (jge mem)))
-
-;;Determine if the heap pointer offseted by the offset value is still within the bounds of the heap
-;;Integer -> ASM
-(define (assert-heap-offset offset)
-  `((mov rbx rdi)
-    (add rbx ,(* 8 offset))
-    (sub rbx (offset rsp -1)) ;;Find the difference between the current position on the heap and the beginning of the heap
-    (cmp rbx (offset rsp -2)) ;;Compare the difference to the size of the heap
-    (jge mem)))
-    
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Reference counting ASM;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -2108,7 +2069,6 @@ type Variable =
     [(cons c lst)
      ;;Place the character on the heap
     `(
-      ,@(assert-heap-offset 0) ;;Ensure that rdi is within the bounds of the heap
       (mov rbx ,(char->integer c))
       (mov (offset rdi 0) rbx)
       
