@@ -1,5 +1,6 @@
 /* This file contains code for starting the program, printing its results and pefroming some routines required by the running program */
 #include "runtime.h"
+#include "mem.h"
 
 int64_t entry(void* heap, void* heap_start_addr, int64_t h_size);
 void printResult(int64_t value);
@@ -9,6 +10,7 @@ void printPair(int64_t value);
 int64_t compValue(int64_t value1, int64_t value2);
 int comBignum(int64_t arg0, int64_t arg1);
 int error(void);
+void runtimeSystemError(void);
 
 bool gc_info = false; //Set to true if garbage collection  information should be printed with chunks and upon triggering garbage collection. false otherwise.
 
@@ -16,13 +18,8 @@ bool gc_info = false; //Set to true if garbage collection  information should be
 The entry function is linked with this RTS 
 We use the GMP Library to support arbitrary precision integers */
 int main(int argc, char** argv) {
-	void* heap = NULL;
-	heap = malloc(heap_size);
-
-	if(heap == NULL) {
-		fprintf(stderr, "could not allocate heap space");
-		exit(1);
-	}
+	int64_t* heap = NULL;
+	heap = init_heap();
 	
 	//Check if printing gc info is desired
 	if(argc > 1 && (strcmp(*(argv + 1), "gc") == 0)) {
@@ -350,7 +347,7 @@ int nomem() {
 }
 
 /* Signal an error in the runtime system */
-int runtimeSystemError(void) {
+void runtimeSystemError(void) {
 	exit(1);
 }
 

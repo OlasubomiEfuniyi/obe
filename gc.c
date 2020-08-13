@@ -1,17 +1,12 @@
 /* This file contains code that relates to the garbage collector and implicit memory management */
 
 #include "runtime.h"
+#include "mem.h"
 
 void garbageCollect(int64_t ref);
 void decrementRefCount(int64_t ref);
+void gcError(const char* msg);
 
-struct Chunk {
-        int64_t start; //The start address of the chunk of memory on the heap
-        short size; //The number of contiguous bytes that make up this chunk of memory. Should always be a multiple of 8
-        struct Chunk* next; //A pointer to the next free chunk of Memory
-};
-
-struct Chunk* free_list = NULL;
 extern bool gc_info;
 
 /* Add some or all of the memory associated with ref to the free list */
@@ -76,7 +71,7 @@ void garbageCollect(int64_t ref) {
                         }
                         break;
                 default:
-                        runtimeSystemError();
+                        gcError("Attempt to garbage collect a value that is not a chunk");
         }
 }
 
@@ -122,27 +117,7 @@ void decrementRefCount(int64_t ref) {
 
 }
 
-/* Add a new chunk to the free list */
-void  addToFreeList(int64_t start, short size) {
-	//Add the new chunk to the beginning of the free list
-	struct Chunk* chunk = free_list;
-
-	free_list = (struct Chunk*) malloc(sizeof(struct Chunk));
-	if(free_list == NULL) { //check if malloc failed
-		runtimeSystemError();
-	}
-
-	free_list -> start = start;
-	free_list -> size = size;
-	free_list -> next = chunk;
-}
-
-/* Print the chunks in the free list */
-void printFreeList() {
-	struct Chunk* current = free_list;
-
-	while(current != NULL) {
-		printf("Start: %" PRId64 ", Size: %d\n", (current -> start), (current -> size));
-		current = (current -> next);
-	}
+void gcError(const char* msg) {
+	fprintf(stderr, "Garbage collector failed: %s\n", msg);
+	exit(1);
 }

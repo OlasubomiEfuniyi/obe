@@ -22,8 +22,6 @@
 #define type_false ((0b001 << result_shift))
 #define type_empty_list ((0b010 << result_shift))
 
-#define heap_size 8000000000
-
 #define true 1
 #define false 0
 #define GC_INFO(...) (gc_info && printf(__VA_ARGS__))
@@ -32,7 +30,3 @@ typedef char bool;
 
 //Functions to be shared by garbage collector and rts
 void printValue(int64_t value);
-int runtimeSystemError(void);
-void addToFreeList(int64_t start, short size);
-void printFreeList(void);
-
