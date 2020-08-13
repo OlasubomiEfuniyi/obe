@@ -307,29 +307,39 @@ type Variable =
 ;;Compile a box expression
 ;;Expr CEnv -> ASM
 (define (compile-box e1 env)
-  (let ((continue (gensym "continue")))
+  (let ((continue (gensym "continue"))
+        (len (length env))
+        (stack-size (* 8 (+ 2 (length env)))))
     `(
       ,@(compile-e e1 env)
       ;;If the result of compiling e1 is a pointer to a chunk on the heap, this box now has a reference to the chunk
       ;;which it will hold indefinitely. Therefore, the reference count of the chunk should be increased by 1.
       ,@(increment-ref-count continue)
-
       ,continue
+
+      ;;Allocate the 16 bytes needed for the box
+      (mov (offset rsp ,(- (add1 len))) rax) ;;Save the value to be placed in the box on the stack
+      (mov (offset rsp ,(- (+ 2 len))) rdi) ;;Save the value in rdi on the stack
+      (mov rdi 16) ;;Argument to allocateChunk
+      (sub rsp ,stack-size)
+      (call allocateChunk)
+      (add rsp ,stack-size)
+      (mov rdi rax) ;;Get the address where the chunk is to begin into rdi
+      
       ;;Initialize the reference count of the box to 0 since we do not know whether the box is being refernced by variable
       ;;or larger expression
-      ,@(assert-heap-offset 0)
       (mov rbx 0)
       (mov (offset rdi 0) rbx)
 
       ;;Place the value to be boxed on the heap
-      ,@(assert-heap-offset 1)
       (mov (offset rdi 1) rax)
 
       ;;Get the pointer to the box. The first 8 bytes of the box is its
       ;;reference count, while its last 8 bytes is the boxed value
       (mov rax rdi) 
-      (or rax ,type-box) ;;Tag the value as type box
-      (add rdi 16))))
+      (or rax ,type-box)
+      (mov rdi (offset rsp ,(- (+ 2 len))))))) ;;Tag the value as type box
+      
 
 ;;Compile a box operation
 ;;BoxOp CEnv -> ASM
@@ -798,7 +808,8 @@ type Variable =
         (c2 (compile-e e2 (extend #f env)))
         (list (gensym "list"))
         (end (gensym "end"))
-        (stack-size (* 8 (+ 2 (length env))))
+        (len (length env))
+        (stack-size (* 8 (+ 3 (length env))))
         (continue1 (gensym "continue"))
         (continue2 (gensym "continue")))
     `(,@c1
@@ -813,15 +824,20 @@ type Variable =
       ,continue2
       (mov (offset rsp ,(- (+ 2 (length env)))) rax);;Save the result of evaluating the second expression on the stack
 
-      ,@(assert-heap-offset 0) ;;Make sure there is enough heap space for the structure's ref count
+      ;;Allocate the 24 bytes needed by the cons
+      (mov (offset rsp ,(- (+ 3 len))) rdi) ;;Save the value in rdi
+      (mov rdi 24)
+      (sub rsp ,stack-size)
+      (call allocateChunk)
+      (add rsp ,stack-size)
+      (mov rdi rax)
+   
       (mov rbx 0)
       (mov (offset rdi 0) rbx) ;;ref count of the structure is initialized to 0
       
-      ,@(assert-heap-offset 1) ;;Make sure there is enough heap space for the structure's head/first
       (mov rbx (offset rsp ,(- (add1 (length env)))))
       (mov (offset rdi 1) rbx) ;;Move the first value on the heap
       
-      ,@(assert-heap-offset 2) ;;Make sure there is enough heap space for the structure's tail/second
       (mov rbx (offset rsp ,(- (+ 2 (length env)))))
       (mov (offset rdi 2) rbx) ;;Move the second value on the heap
       
@@ -839,7 +855,7 @@ type Variable =
       ,list
       (or rax ,type-list);;Tag the pointer as a list
       ,end
-      (add rdi 24)))) ;;Make rdi contain the address of the next free location on the heap
+      (mov rdi (offset rsp ,(- (+ 3 len))))))) ;;Make rdi contain the address of the next free location on the heap
       
 
 
@@ -1014,6 +1030,10 @@ type Variable =
       ;;Use the result of compBignum to check that the starting point is strictly less than the ending point
       (cmp rax 0)
       (jge err) ;;If the return value is greater than or equal to 0, starting point is greater than or equal to ending point
+
+
+      ;;Allocate the 32 bytes needed for the range as well as the 24 bytes needed for the decremented end of the range
+      ;;TODO: This, others below, and for
       
       ;;;;;;;;;;;;;;;;;Decrement the end of the range before placing it on the heap;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       (mov rax (offset rsp ,(- (+ 2 (length env)))))

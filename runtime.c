@@ -104,6 +104,7 @@ int64_t compileBignum(int64_t bn_str_ptr, int64_t bn_struct_ptr) {
 
 	//Put bn on the heap starting from the address in bn_struct_ptr
 	memcpy((void *)bn_struct_ptr, (void *)&bn, sizeof(bn));
+	free(str);
 	return sizeof(bn); 
 }
 

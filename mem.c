@@ -13,6 +13,8 @@ struct Chunk {
 };
 struct Chunk* free_list = NULL;
 int64_t* heap = NULL;
+int64_t next_free_pos_in_heap = 0;
+int64_t end_address = -1;
 
 /* This function creates the heap and returns a pointer to it */
 int64_t* init_heap() {
@@ -21,7 +23,53 @@ int64_t* init_heap() {
 		memError("Could not malloc a heap");
 	}
 	
+	next_free_pos_in_heap = (int64_t) heap; //When just initialized, the next free position on the heap is at the beginning of the heap	
+	end_address = (((int64_t) heap) + heap_size); //The first address that exceeds the upper bound of the heap
+
 	return heap;
+}
+
+/* Allocate space on the heap for a chunk of the given size */
+int64_t allocateChunk(short size) {
+	int64_t chunk = 0;
+
+	//Determine if there is enough space between the next free position on the heap
+	//and the end of the heap to satisfy the request
+	if((next_free_pos_in_heap + ((int64_t) size)) <= end_address) {
+		//There is enough space. If equal, the next free position on the heap will be out of bounds
+		chunk = next_free_pos_in_heap;
+		next_free_pos_in_heap += size;
+			
+	} else { //We do not have enough space. Scan the free list
+		struct Chunk* current = free_list;
+		struct Chunk* prev = NULL;
+
+		while(current != NULL) { //Find the first chunk on the free list that can satisfy the request
+			if((current -> size) >= size) {
+				break;
+			}
+
+			prev = current; 
+			current = current -> next;
+			
+		}
+
+		if(current != NULL) { //A chunk was found on the free list that can satisfy the request
+			chunk = (current -> start);
+
+			//Remove current from the free list
+			if(prev == NULL) { //Curret is the head of the free list
+				free_list = free_list -> next;
+			} else {
+				prev -> next = current -> next;
+				free(current);
+			}
+		} else {
+			memError("Unable to allocate memory on the heap");
+		}
+	}
+
+	return chunk;
 }
 
 /* Exit with an error */
