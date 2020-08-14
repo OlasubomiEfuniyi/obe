@@ -332,6 +332,7 @@ type Variable =
       (mov (offset rdi 0) rbx)
 
       ;;Place the value to be boxed on the heap
+      (mov rax (offset rsp ,(- (add1 len))))
       (mov (offset rdi 1) rax)
 
       ;;Get the pointer to the box. The first 8 bytes of the box is its
@@ -451,10 +452,11 @@ type Variable =
 (define (compile-for v e-rng exprs env)
   (let ((c-rng (compile-e e-rng env))
         ;;reserve five spots on the stack where the beginning of the range, end of the range, rdi, rsi and range will reside.
-        (c-exprs (compile-es exprs (extend #f (extend #f (extend #f (extend #f (extend v env)))))))
+        (c-exprs (compile-es exprs (append `(#f #f #f #f #f #f #f ,v) env)))
         (end (gensym "end"))
         (loop (gensym "loop"))
-        (stack-size (* 8 (+ 5 (length env))))
+        (len (length env))
+        (stack-size (* 8 (+ 8 (length env))))
         (continue1 (gensym "continue"))
         (continue2 (gensym "continue"))
         (continue3 (gensym "continue"))
@@ -487,22 +489,26 @@ type Variable =
       (mov rax (offset r15 1)) ;;rax now holds the beginning of the range
       ,@(increment-ref-count continue3)
       ,continue3
-      (mov rbx (offset r15 1)) ;;Move the beginning of the range into rbx
+      (mov rbx rax) ;;Move the beginning of the range into rbx
       (mov rax (offset r15 2)) ;;Move the end of the range into rax.
 
+      (mov (offset rsp ,(- (+ 7 len))) rdx) ;;Save whatever is in rdx
+      (mov rdx (offset r15 3)) ;;Move the step value into rdx
+      (xor rdx ,type-bignum) ;;Untag the address to the bignum
+      
       ;;Always make sure that the current value of v is at offset 1 from the top of the stack and
       ;;the end of the range is at offset 2 at the top of the stack.
-      ;;Save rdi and rsi at the top of the stack
       (mov (offset rsp ,(- (add1 (length env)))) rbx)
       (mov (offset rsp ,(- (+ 2 (length env)))) rax)
       (mov (offset rsp ,(- (+ 3 (length env)))) rdi)
       (mov (offset rsp ,(- (+ 4 (length env)))) rsi)
+      (mov (offset rsp ,(- (+ 8 len))) rdx) ;;Save the step value on the stack
 
+      
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Iterate;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       ,loop
       
       ,@c-exprs ;;Execute the body of the loop
-      ;;Increment the bignum in rbx and compare it with the bignum in rax to determine when to stop
 
       ;;Allocate space on the heap for the next value of v (24 bytes)
       (mov rdi 24)
@@ -510,7 +516,7 @@ type Variable =
       (call allocateChunk)
       (add rsp ,stack-size)
       (mov rdi rax)
-      (mov (offset rsp ,(- (+ 6 (length env)))) rdi) ;;Save the address of the bignum to be represented by v on the stack
+      (mov (offset rsp ,(- (+ 5 (length env)))) rdi) ;;Save the address of the bignum to be represented by v on the stack
       
       ;;Initialize the reference count of the bignum that will be placed on the stack by increment to 1 (not 0 since we are going to increment it anyways).
       ;;It is initialized to 1 because the for loop has a reference to it which it will loose and therefore
@@ -519,16 +525,23 @@ type Variable =
       ;;within the body of the for loop.
       (mov r15 1)
       (mov (offset rdi 0) r15)
-      
-      (mov rsi rdi) ;;The second argument is an untagged pointer to a position on the heap where the resulting
-                    ;;GMP struct should ge placed
-      (add rsi 8) ;;make rsi point to the next free position i.e after the reference count
-      
-      (mov rdi (offset rsp ,(- (add1 (length env))))) ;;The first argument is the bignum to be incremented
-      
-      (xor rdi ,type-bignum)
+      (add rdi 8)
+
+      ;;Initialize the GMP struct where the result of increment will be placed
       (sub rsp ,stack-size)
-      (call increment)
+      (call my_mpz_init)
+      (add rsp ,stack-size)
+
+      ;;Add the step value to the old value of v
+      (mov rdi (offset rsp ,(- (+ 5 len)))) ;;The first argument is an untagged pointer to a position on the heap where the resulting
+                    ;;GMP struct should ge placed
+      (add rdi 8) ;;make rdi point to the next free position i.e after the reference count
+      (mov rsi (offset rsp ,(- (add1 (length env))))) ;;The second argument is the bignum to be incremented
+      (xor rsi ,type-bignum) ;;Untag the address of the the bignum to be incremented
+      (mov rdx (offset rsp ,(- (+ 8 len)))) ;;The pointer was untagged before saving it on the stack
+      
+      (sub rsp ,stack-size)
+      (call my_mpz_add)
       (add rsp ,stack-size) ;;Restore the stack
       
       
@@ -538,7 +551,7 @@ type Variable =
       ,continue2
 
       ;;Place the new value of v on the stack
-      (mov rax (offset rsp ,(- (+ 6 (length env)))))
+      (mov rax (offset rsp ,(- (+ 5 (length env)))))
       (or rax ,type-bignum)
       (mov (offset rsp ,(- (add1 (length env)))) rax)
       
@@ -556,9 +569,10 @@ type Variable =
 
       (mov rdi (offset rsp ,(- (+ 3 (length env)))));;Restore rdi
       (mov rsi (offset rsp ,(- (+ 4 (length env)))));;Restore rsi
+      (mov rdx (offset rsp ,(- (+ 7 len)))) ;;Restore rdx
       
       ;;Decrement the reference count of the range
-      (mov rax (offset rsp ,(- (+ 5 (length env)))))
+      (mov rax (offset rsp ,(- (+ 6 len))))
       ,@(decrement-ref-count continue4 stack-size #t)
       ,continue4
       (mov rax ,type-true)
@@ -998,9 +1012,9 @@ type Variable =
       (xor rax ,type-bignum) ;;Untag the pointer to the bignum
       (mov (offset rsp ,(- (+ 3 (length env)))) rax) ;;save the step value on the stack
 
-      ;;;;;;;;;;;;;;;;Make sure the step value is positive;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       (mov (offset rsp ,(- (+ 6 (length env)))) rdi)
       (mov (offset rsp ,(- (+ 5 (length env)))) rsi)
+      ;;;;;;;;;;;;;;;;Make sure the step value is positive;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       (mov rdi rax)
       (mov rsi 1)
       (sub rsp ,stack-size)
@@ -1025,30 +1039,37 @@ type Variable =
 
 
       ;;Allocate the 32 bytes needed for the range as well as the 24 bytes needed for the decremented end of the range
-      (mov (offset rsp ,(- (+ 6 (length env)))) rdi)
       (mov rdi 32)
       (sub rsp ,stack-size)
       (call allocateChunk)
       (add rsp ,stack-size)
       (mov (offset rsp ,(- (+ 4 len))) rax) ;;Save the addres to the beginning of the range on the stack
-      (mov rdi 16)
+      (mov rdi 24)
       (sub rsp ,stack-size)
       (call allocateChunk)
       (add rsp ,stack-size)
-      (mov (offset rsp ,(- (+ 7 len))) rax) ;;Save the address to the beginning of the end of the range on the stack
+      (mov (offset rsp ,(- (+ 7 len))) rax) ;;Save the address to the beginning of the decremented end of the range on the stack
       
       
       ;;;;;;;;;;;;;;;;;Decrement the end of the range before placing it on the heap;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-      (mov rdi (offset rsp ,(- (+ 2 (length env)))))
-      (mov rsi (offset rsp ,(- (+ 7 (length env)))))
+      (mov rdi (offset rsp ,(- (+ 7 (length env)))))
       
       ;;Set the reference count of the new bignum to be made to 0
       (mov rbx 0)
-      (mov (offset rsi 0) rbx)
-      (add rsi 8)
+      (mov (offset rdi 0) rbx)
+      (add rdi 8)
+
+      ;;Initialize the GMP struct that will hold the decremented value
+      (sub rsp ,stack-size)
+      (call my_mpz_init)
+      (add rsp ,stack-size)
+
+      ;;Decrement the end of the range
+      (mov rdi (offset rsp ,(- (+ 2 (length env)))))
+      (mov rsi (offset rsp ,(- (+ 7 (length env)))))
+      (add rsi 8) ;;Skip reference count
       (sub rsp ,stack-size)
       (call decrement)
-
       (add rsp ,stack-size) ;;Restore the stack
       
 
@@ -1067,7 +1088,7 @@ type Variable =
       (or rax ,type-bignum)
       (mov (offset rdi 1) rax)
       
-      (mov rax (offset rsp ,(- (+ 4 (length env))))) ;;Get the pointer to the decremented bignum
+      (mov rax (offset rsp ,(- (+ 7 (length env))))) ;;Get the pointer to the decremented bignum
       (or rax ,type-bignum) ;;Tag the bignum
       ,@(increment-ref-count continue5)
       ,continue5
@@ -1120,9 +1141,10 @@ type Variable =
       (xor rax ,type-bignum) ;;Untag the pointer to the bignum
       (mov (offset rsp ,(- (+ 3 (length env)))) rax) ;;save the step value of the range on the stack
 
-      ;;;;;;;;;;;;;;;;Make sure the step value is positive;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       (mov (offset rsp ,(- (+ 4 (length env)))) rdi)
       (mov (offset rsp ,(- (+ 5 (length env)))) rsi)
+      
+      ;;;;;;;;;;;;;;;;Make sure the step value is positive;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       (mov rdi rax)
       (mov rsi 1)
       (sub rsp ,stack-size)
@@ -1172,6 +1194,7 @@ type Variable =
       (mov rax rdi)
       (or rax ,type-range)
       (mov rdi (offset rsp ,(- (+ 4 len))));;Restore rdi
+      (mov rsi (offset rsp ,(- (+ 5 len))));;Restore rsi
       )))
        
 
