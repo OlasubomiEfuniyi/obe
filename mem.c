@@ -5,6 +5,7 @@
 #include <assert.h>
 #include "mem.h"
 
+
 void memError(const char* msg);
 
 struct Chunk {
@@ -12,7 +13,11 @@ struct Chunk {
         short size; //The number of contiguous bytes that make up this chunk of memory. Should always be a multiple of 8
         struct Chunk* next; //A pointer to the next free chunk of Memory
 };
+
 struct Chunk* free_list = NULL;
+
+extern bool gc_info;
+int64_t bytes_allocated = 0;
 int64_t* heap = NULL;
 int64_t next_free_pos_in_heap = 0;
 int64_t end_address = -1;
@@ -43,6 +48,8 @@ int64_t allocateChunk(short size) {
 		next_free_pos_in_heap += size;
 			
 	} else { //We do not have enough space. Scan the free list
+		GC_INFO("Scanning free list for more space\n");
+		
 		struct Chunk* current = free_list;
 		struct Chunk* prev = NULL;
 
@@ -67,11 +74,19 @@ int64_t allocateChunk(short size) {
 				free(current);
 			}
 		} else {
+			if(gc_info == true) {
+				printFreeList();
+			}
 			memError("Unable to allocate memory on the heap");
 		}
 	}
 
+	bytes_allocated += (int64_t) size;
 	
+	if(gc_info == true) {
+		printf("Bytes allocated: %" PRId64 "\n", bytes_allocated);
+	}
+
 	return chunk;
 }
 
