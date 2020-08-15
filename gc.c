@@ -22,6 +22,7 @@ void garbageCollect(int64_t ref) {
                         //Bignums do not have inner chunks so there is no need to attempt to recursively garbage collect
                         //Place the 24 bytes used by the bignum back on the free list
                         addToFreeList((ref ^ type_bignum), 24);
+			
 			break;
                 case type_list:
                         {
@@ -32,6 +33,7 @@ void garbageCollect(int64_t ref) {
                         decrementRefCount(tail);
                         //Place the 24 bytes used by the cons back on the free list
                         addToFreeList((ref ^ type_list), 24);
+			
 			}
                         break;
                 case type_pair:
@@ -43,6 +45,7 @@ void garbageCollect(int64_t ref) {
                         decrementRefCount(second);
                         //Place the 24 bytes used by the cons back on the free list
 			addToFreeList((ref ^ type_pair), 24);
+			
                         }
                         break;
                 case type_range:
@@ -59,7 +62,8 @@ void garbageCollect(int64_t ref) {
                         decrementRefCount(step);
                         //Add the 32 contiguous bytes that made up the range to the free list 
 			addToFreeList((ref ^ type_range), 32);
-                        }
+			
+                      	}
                         break;
                 case type_box:
                         {
@@ -68,6 +72,7 @@ void garbageCollect(int64_t ref) {
                         decrementRefCount(value);
                         //Add the 16 contiguous bytes that made up the box to the free list
 			addToFreeList((ref ^ type_box), 16);
+			
                         }
                         break;
                 default:
