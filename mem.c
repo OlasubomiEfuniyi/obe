@@ -21,6 +21,7 @@ struct Chunk* free_list = NULL;
 extern bool gc_info;
 int64_t bytes_allocated = 0;
 int64_t* heap = NULL;
+int64_t* map = NULL;
 int64_t next_free_pos_in_heap = 0;
 int64_t end_address = -1;
 
@@ -106,6 +107,16 @@ void compact(int64_t num_garbage_bytes) {
 	assert(temp_heap_size >= 0);
 
 	if(temp_heap_size > 0) {//Then there is something to be kept
+		if(map == NULL) { //map has never been created
+			map = (int64_t*)malloc(heap_size);
+			if(map == NULL) {
+				memError("Failed to allocate memory for the map");
+			}		
+		}
+		
+		//O is not a valid heap address, so it works as a default value
+		memset((void*)map, 0, heap_size); 	
+		
 		char* temp_heap = (char*)malloc(temp_heap_size);
 		if(temp_heap == NULL) {
 			memError("Unable to allocate temporary heap for compaction");
@@ -113,22 +124,42 @@ void compact(int64_t num_garbage_bytes) {
 		char* curr_temp_heap = temp_heap;
 		char* curr_heap = (char*)heap;
 		struct Chunk* curr_free_list = free_list;
+		int64_t i;
+		int64_t v;
 
 		while(curr_free_list != NULL) {
 			//Continue to copy non garbage contiguous chunks into temp_heap until all garbage has been ignored
 			size_t bytesToCopy = (size_t)((curr_free_list -> start) - (int64_t)curr_heap);
 		
 			memcpy((void*)curr_temp_heap, (void*)curr_heap, bytesToCopy);
+			
+			i = (int64_t)curr_heap; //Used to calculate the index of the map
+			v = (int64_t)curr_temp_heap; //The value to be placed at the index	
+		
+			for(; i < ((int64_t)curr_heap + bytesToCopy); i += 8, v += 8) {
+
+				//The map can be read as "what used to be at address i is now at address v
+				map[(i - ((int64_t)heap))/sizeof(int64_t)] = ((int64_t)heap) + (v - (int64_t)temp_heap);
+			}
 
 			curr_temp_heap += bytesToCopy; //Point to next free position on temp_heap
 			curr_heap += (bytesToCopy + (curr_free_list -> size)); //point to the next byte after garbage
 			curr_free_list = curr_free_list -> next;
+			 
 		}
 		
 		//Nothing is left on the free list, so everything we encounter from now on is to be kept		
 		size_t bytesToCopy =  (size_t)(end_address - (int64_t)curr_heap);
 	
 		memcpy((void*)curr_temp_heap, (void*)curr_heap, bytesToCopy);
+		
+		i = (int64_t)curr_heap; //Used to calculate the index of the map
+		v = (int64_t)curr_temp_heap; //The value to be placed at the index	
+		
+		for(; i < ((int64_t)curr_heap + bytesToCopy); i += 8, v += 8) {
+			//The map can be read as "what used to be at address i is now at address v
+			map[(i - ((int64_t)heap))/sizeof(int64_t)] = ((int64_t)heap) + (v - (int64_t)temp_heap); 
+		}
 
 		curr_temp_heap += bytesToCopy;
 		curr_heap += bytesToCopy;
