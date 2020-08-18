@@ -33,8 +33,9 @@
 (define type-false (arithmetic-shift #b001 result-shift))
 (define type-empty-list (arithmetic-shift #b010 result-shift))
 
-
-
+;;Tags used by memory manager
+(define type-chunk #b000)
+(define type-map #b001)
 
 #|
 type CEnv = Listof(Symbol)
@@ -235,10 +236,24 @@ type Variable =
 ;;Expr -> ASM
 (define (compile expr)
   `(
+    ;;This label represents the entry function. The function begins the
+    ;;execution of the program.
+    entry
+    (push rbp)
+    (mov rbp rsp)
+    (push rbx)
+    (push rdi)
+    (push rsi)
+    (push r12)
+    (push r13)
+    (push r14)
+    (push r15)
+    
     (mov (offset rsp -1) rsi)
     (mov (offset rsp -2) rdx)
     ,@(compile-e (desugar expr) '(#f #f)) ;;Start with empty environment
-    ;;Since rsp is never moved beyond the initial stack fram setup, this sould revert the setup
+    ;;Since rsp is never moved beyond the initial stack fram setup, this should revert the setup
+    wrapUp
     (pop r15)
     (pop r14)
     (pop r13)
@@ -251,10 +266,61 @@ type Variable =
     err
     (push rbp)
     (call error)
-    mem
+    ret
+
+
+    ;;This label represents the completeCompaction function. The function analyses the stack of the entry
+    ;;program, tracing pointers and replacing them with their new location on the heap. The function must be passed
+    ;;two arguments: the number of bytes on the stack frame whose pointers are to be adjusted and the untagged address to the beginning of the map
+    completeCompaction
     (push rbp)
-    (call nomem)
-    ret))
+    (mov rbp rsp) ;;The base of completeCompaction's stack is where rbp is stored. This is one position above the return address
+    ;;Save the callee save registers
+    (push rbx)
+    (push rdi)
+    (push rsi)
+    (push r12)
+    (push r13)
+    (push r14)
+    (push r15)
+
+    ;;Fix the pointers
+    (mov rax (offset rbp 3)) ;;Get the number of bytes on the stack being corrected
+    (mov rsi (offset rbp 2)) ;;Get the untagged address of the map that will be used for the correction
+
+    ,@(let ((loop (gensym "loop"))
+            (end (gensym "end")))
+        `(;;Continue to loop until each individual value on the stack is explored
+          (cmp rax 0)
+          (jle ,end)
+          ,loop
+          (mov rsp rbp)
+          (add rsp 24) ;;Ignore the ret address and the two arguments
+          (add rsp rax) ;;rsp now contains the address of the next value on the stack to be examined
+          
+          (mov rdi (offset rsp 0))
+          (mov rsp rbp)
+          (call printResult)
+          
+          (sub rax 8) ;;Each item on the stack is 8 bytes large
+          (cmp rax 0)
+          (jg ,loop)
+          
+          ,end
+          (mov rsp rbp)))
+   
+    ;;Pop the callee save registers
+    (pop r15)
+    (pop r14)
+    (pop r13)
+    (pop r12)
+    (pop rsi)
+    (pop rdi)
+    (pop rbx)
+    (pop rbp) ;;callers rbp is restored. rsp will now be the address of the return address on the stack
+    
+    ret ;;Pop the return address off the stack
+    ))
 
 ;;The toplevel compile function from which the compilation of an expression begins
 ;; Expr CEnv -> Listof(ASM)
@@ -460,7 +526,8 @@ type Variable =
         (continue1 (gensym "continue"))
         (continue2 (gensym "continue"))
         (continue3 (gensym "continue"))
-        (continue4 (gensym "continue")))
+        (continue4 (gensym "continue"))
+        (continue5 (gensym "continue")))
 
     `(,@c-rng ;;Compile the range
       ;;This for loop will hold a reference count to the range during its execution. It will lose the reference when it is done.
@@ -515,6 +582,8 @@ type Variable =
       (sub rsp ,stack-size)
       (call allocateChunk)
       (add rsp ,stack-size)
+      ,@(complete-allocation continue5 stack-size)
+      ,continue5
       (mov rdi rax)
       (mov (offset rsp ,(- (+ 5 (length env)))) rdi) ;;Save the address of the bignum to be represented by v on the stack
       
@@ -2047,6 +2116,30 @@ type Variable =
     (add rsp ,(+ 8 stack-size))
     (mov rdi r14)
     (mov rax (offset rsp ,(- (add1 (/ stack-size 8)))))
+    (jmp ,continue)))
+
+;;This function generates ASM that examines the value returned by a request made to allocateChunk. This value is assumed to be in rax
+;;If it is a chunk, the untagged address is placed in rax. If it is a map, pointers are fixed, and a call
+;;is made to allocate a chunk again.
+;;Symbol -> ASM
+(define (complete-allocation continue stack-size)
+  `((mov rbx rax)
+    (and rbx ,result-type-mask)
+    (cmp rbx ,type-chunk)
+    (je ,continue) ;;type-chunk does not need to be untagged
+    (cmp rbx ,type-map)
+    (jne err)
+    ;;call completeCompaction
+    (sub rsp ,stack-size) ;;rsp now contains the address of the topmost value on the stack
+    (mov rbx ,stack-size) ;;The number of bytes on the stack. This only counts program specific values, not those placed on the stack to obey calling conventions
+    (mov (offset rsp -1) rbx) ;;Make the number of bytes on the stack the first argument
+    (xor rax ,type-map)
+    (mov (offset rsp -2) rax) ;;Make the untagged address of the map the second argument
+    (sub rsp 16)
+    ;;Alongside completing the compaction process, the address to the requested chunk whick kicked of the compaction should be returned in rax
+    (call completeCompaction)
+    (add rsp 16)
+    (add rsp ,stack-size)
     (jmp ,continue)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Helper Functions;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

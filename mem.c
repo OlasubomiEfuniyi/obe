@@ -6,9 +6,11 @@
 #include <string.h>
 #include "mem.h"
 
+#define type_chunk 0b000
+#define type_map 0b001
 
 void memError(const char* msg);
-void compact(int64_t num_garbage_bytes);
+int64_t compact(int64_t num_garbage_bytes);
 
 struct Chunk {
         int64_t start; //The start address of the chunk of memory on the heap
@@ -83,8 +85,12 @@ int64_t allocateChunk(short size) {
 				free(current);
 			}
 		} else if(num_bytes_seen >= size) { //The request can be satisfied after compaction
-			compact(num_bytes_seen);	
-			memError("The request can be satisfied after compaction");
+			int64_t map = compact(num_bytes_seen);
+			
+			assert((map % 8) == 0);
+			return (map | type_map);
+	
+			//memError("The request can be satisfied after compaction");
 		} else {
 			if(gc_info == true) {
 				printFreeList();
@@ -99,10 +105,14 @@ int64_t allocateChunk(short size) {
 		printf("Bytes allocated: %" PRId64 "\n", bytes_allocated);
 	}
 
-	return chunk;
+	
+	//Since malloc gives 8 byte alligned addresses, tagging can be used to indicate when a chunk is returned and when 
+	// a map is returned.
+	assert((chunk % 8) == 0);
+	return (chunk | type_chunk);
 }
 
-void compact(int64_t num_garbage_bytes) {
+int64_t compact(int64_t num_garbage_bytes) {
 	size_t temp_heap_size = heap_size - num_garbage_bytes; 
 	assert(temp_heap_size >= 0);
 

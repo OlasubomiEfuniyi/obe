@@ -281,6 +281,9 @@ void printBignum(int64_t value) {
 	mpz_out_str(stdout,10,*gmp);
 }
 
+void printInt(int64_t value) {
+	printf("%" PRId64 "\n", value);
+}
 
 /* Fully rotate the string in place */
 void rotateString(char* str) {
