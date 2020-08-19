@@ -179,22 +179,26 @@ void printResult(int64_t value) {
 /* Print a value. If printEmpty is true, print the empty list symbol, otherwise do not */
 void printValue(int64_t value) {
 	int64_t* addr;
-
+	
 	switch(value & result_type_mask) {
-	case type_bignum:			
+	case type_bignum:
+		printf("I am a bignum\n");			
 		printBignum(value);	
 		break;
 	case type_list:
+		printf("I am a list\n");
 		printf("(");
 		printList(value);
 		printf(")");
 		break;
 	case type_pair:
+		printf("I am a pair\n");
 		printf("(");
 		printPair(value);
 		printf(")");
 		break;
 	case type_imm:
+		printf("I am an immediate\n");
 		switch(value) {
 			case type_empty_list:
 				printf("()");
@@ -205,11 +209,12 @@ void printValue(int64_t value) {
 			case type_false:
 				printf("#f");
 				break;
-			default:
-				error();	
+			//default:
+				//error();	
 		}
 		break;
 	case type_range:
+		printf("I am a range\n");
 		GC_INFO("Ref Count: %" PRId64 " Value: ", *((int64_t *)(value ^ type_range)));
 		printf("(");
 		addr = ((int64_t *) (value ^ type_range)) + 1;
@@ -221,13 +226,15 @@ void printValue(int64_t value) {
 		printf(")");
 		break;
 	case type_box:
+		printf("I am a box\n");
 		GC_INFO("Ref Count: %" PRId64 " Value: ", *((int64_t*)(value ^ type_box)));
 		printf("#&");
 		printValue(*(((int64_t*)(value ^ type_box) + 1)));
 
 		break;
 	default:
-		error();
+		return;
+		//error();
 	}
 
 }
@@ -235,7 +242,7 @@ void printValue(int64_t value) {
 /* Print a list of values */
 void printList(int64_t value) {
 	int64_t* start_addr = (int64_t *)(value ^ type_list);
-	if(*start_addr != type_empty_list) {
+	if(validateAddr((int64_t)start_addr) && (*start_addr != type_empty_list)) {
 		GC_INFO("[Ref count: %" PRId64 "]", *start_addr);
 		start_addr++;
 		printValue(*start_addr);
@@ -253,6 +260,7 @@ void printList(int64_t value) {
 /* Print a pair of values */
 void  printPair(int64_t value) {
 	int64_t* start_addr  = (int64_t *)(value ^ type_pair);
+	if(validateAddr((int64_t)start_addr)) {
 		GC_INFO("[Ref count: %" PRId64 "]", *start_addr);
 		start_addr++;
 		printValue(*start_addr);
@@ -266,19 +274,22 @@ void  printPair(int64_t value) {
 			printf(" . ");
 			printValue(value);
 		}
-	
-
+	}			
 }
 
 /* Given a pointer to a gmp struct, print the bignum it represents */
 void printBignum(int64_t value) {
 	//Clear the tagging to get the address
 	int64_t* result = (int64_t*)(value ^ type_bignum);
- 
-	GC_INFO("Ref Count: %" PRId64 " Value: ", *result);
-	mpz_t* gmp = (mpz_t*)(result + 1);
 	
-	mpz_out_str(stdout,10,*gmp);
+	if(validateAddr((int64_t)result)) {
+		GC_INFO("Ref Count: %" PRId64 " Value: ", *result);
+		mpz_t* gmp = (mpz_t*)(result + 1);
+	
+		mpz_out_str(stdout,10,*gmp);
+	} else {
+		printf("The addr is invalid\n");
+	}
 }
 
 void printInt(int64_t value) {

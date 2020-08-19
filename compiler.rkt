@@ -292,22 +292,34 @@ type Variable =
             (end (gensym "end")))
         `(;;Continue to loop until each individual value on the stack is explored
           (cmp rax 0)
-          (jle ,end)
+          ;;(jle ,end)
+
+          (mov rdi rsi)
+          (call printInt)
           ,loop
-          (mov rsp rbp)
+          #|(mov rsp rbp)
           (add rsp 24) ;;Ignore the ret address and the two arguments
           (add rsp rax) ;;rsp now contains the address of the next value on the stack to be examined
-          
+
+          (mov rdi rax)
+          (mov rsp rbp)
+          (call printInt)
+          (add rsp 24)
+          (add rsp (offset rbp 3))
           (mov rdi (offset rsp 0))
+          (add rdi rsi)
+          (mov rdi (offset rdi 0))
           (mov rsp rbp)
           (call printResult)
-          
+
+          (mov rax (offset rbp 3))
           (sub rax 8) ;;Each item on the stack is 8 bytes large
+          (mov (offset rbp 3) rax)
           (cmp rax 0)
           (jg ,loop)
           
           ,end
-          (mov rsp rbp)))
+          (mov rsp rbp)|#))
    
     ;;Pop the callee save registers
     (pop r15)
@@ -517,7 +529,6 @@ type Variable =
 ;;Variable Expr ListOf(Expr) CEnv -> ASM
 (define (compile-for v e-rng exprs env)
   (let ((c-rng (compile-e e-rng env))
-        ;;reserve five spots on the stack where the beginning of the range, end of the range, rdi, rsi and range will reside.
         (c-exprs (compile-es exprs (append `(#f #f #f #f #f #f #f ,v) env)))
         (end (gensym "end"))
         (loop (gensym "loop"))
@@ -529,7 +540,8 @@ type Variable =
         (continue4 (gensym "continue"))
         (continue5 (gensym "continue")))
 
-    `(,@c-rng ;;Compile the range
+    `(
+      ,@c-rng ;;Compile the range
       ;;This for loop will hold a reference count to the range during its execution. It will lose the reference when it is done.
       ;;I increment and then decrement the reference count because in a case where the range expression was only created to be used by the for loop, the decrement
       ;;step, in undoing the increment will also cause a garbage collection of the range. However, it is possible that the for loop is referencing an already exisiting
@@ -570,7 +582,6 @@ type Variable =
       (mov (offset rsp ,(- (+ 3 (length env)))) rdi)
       (mov (offset rsp ,(- (+ 4 (length env)))) rsi)
       (mov (offset rsp ,(- (+ 8 len))) rdx) ;;Save the step value on the stack
-
       
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Iterate;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       ,loop

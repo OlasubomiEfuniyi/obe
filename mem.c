@@ -11,6 +11,7 @@
 
 void memError(const char* msg);
 int64_t compact(int64_t num_garbage_bytes);
+bool in_free_list(int64_t addr);
 
 struct Chunk {
         int64_t start; //The start address of the chunk of memory on the heap
@@ -84,13 +85,21 @@ int64_t allocateChunk(short size) {
 				prev -> next = current -> next;
 				free(current);
 			}
+
 		} else if(num_bytes_seen >= size) { //The request can be satisfied after compaction
 			int64_t map = compact(num_bytes_seen);
 			
-			assert((map % 8) == 0);
-			return (map | type_map);
-	
-			//memError("The request can be satisfied after compaction");
+			if(map == 0) { //Nothing was moved. The entire heap contained garbage
+				chunk = next_free_pos_in_heap;
+				next_free_pos_in_heap += size;
+			} else {
+				assert((map % 8) == 0);
+				printf("Map: %" PRId64 "\n", map);
+				return (map | type_map);
+				//memError("The request can be satisfied after compaction");
+
+			}
+
 		} else {
 			if(gc_info == true) {
 				printFreeList();
@@ -182,9 +191,11 @@ int64_t compact(int64_t num_garbage_bytes) {
 		next_free_pos_in_heap = (int64_t)heap + temp_heap_size;
 		
 		free(temp_heap);
+		return (int64_t)map;
 	} else {
 		//There is nothing to be kept. The entire heap is available again.
 		next_free_pos_in_heap = (int64_t)heap;
+		return 0;
 	}
 }
 
@@ -255,3 +266,31 @@ void printFreeList() {
         }
 }
 
+/* This function returns true if addr is the address of an allocated  chunk  on the heap. Otherwise it returns false */
+bool validateAddr(int64_t addr) {
+	return (((addr >= (int64_t)heap) && (addr < next_free_pos_in_heap)) || ((next_free_pos_in_heap == end_address) && !in_free_list(addr)));
+}
+
+/* This function returns true if addr corresponds to the start address of a chunk on the free list. Otherwise, it returns false */
+bool in_free_list(int64_t addr) {
+	struct Chunk* current = NULL;
+
+	current = free_list;
+
+	
+	while(current != NULL) {
+		if(addr == (current->start)) {
+			return true;
+		}
+		
+		//The free list is sorted by start address so there is no chance of finding a chunk whose start address is addr
+		if(addr > (current->start)) {
+			return false;
+		}
+
+		current = current -> next;
+
+	}
+
+	return false;
+}

@@ -19,3 +19,4 @@ int64_t* init_heap(void);
 int64_t allocateChunk(short size);
 void addToFreeList(int64_t start, short size);
 void printFreeList(void);
+bool validateAddr(int64_t addr);
