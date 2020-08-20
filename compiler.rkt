@@ -249,8 +249,8 @@ type Variable =
     (push r14)
     (push r15)
     
-    (mov (offset rsp -1) rsi)
-    (mov (offset rsp -2) rdx)
+    (mov (offset rsp -1) rdi)
+    (mov (offset rsp -2) rsi)
     ,@(compile-e (desugar expr) '(#f #f)) ;;Start with empty environment
     ;;Since rsp is never moved beyond the initial stack fram setup, this should revert the setup
     wrapUp
@@ -271,7 +271,8 @@ type Variable =
 
     ;;This label represents the completeCompaction function. The function analyses the stack of the entry
     ;;program, tracing pointers and replacing them with their new location on the heap. The function must be passed
-    ;;two arguments: the number of bytes on the stack frame whose pointers are to be adjusted and the untagged address to the beginning of the map
+    ;;three arguments: the number of bytes on the stack frame whose pointers are to be adjusted,the untagged address to the beginning of the map
+    ;;and the address of the beginning of the heap
     completeCompaction
     (push rbp)
     (mov rbp rsp) ;;The base of completeCompaction's stack is where rbp is stored. This is one position above the return address
@@ -285,41 +286,65 @@ type Variable =
     (push r15)
 
     ;;Fix the pointers
-    (mov rax (offset rbp 3)) ;;Get the number of bytes on the stack being corrected
-    (mov rsi (offset rbp 2)) ;;Get the untagged address of the map that will be used for the correction
+    (mov rax (offset rbp 4)) ;;Get the number of bytes on the stack being corrected
+    (mov rsi (offset rbp 3)) ;;Get the untagged address of the map that will be used for the correction
 
     ,@(let ((loop (gensym "loop"))
-            (end (gensym "end")))
+            (end (gensym "end"))
+            (continue (gensym "continue"))
+            (body (gensym "body")))
         `(;;Continue to loop until each individual value on the stack is explored
           (cmp rax 0)
           ;;(jle ,end)
 
-          (mov rdi rsi)
-          (call printInt)
           ,loop
-          #|(mov rsp rbp)
-          (add rsp 24) ;;Ignore the ret address and the two arguments
-          (add rsp rax) ;;rsp now contains the address of the next value on the stack to be examined
+          (mov rsp rbp) ;;reset rsp to the base of this functions stack
+          (add rsp 32) ;;Ignore the ret address and the three arguments
+          (add rsp rax) ;;rsp now contains the address on the stack of the next value on the stack to be examined
+          
+          ;;Get the new address corresponding to this value if it was the address of a chunk on the heap
+          (mov rbx (offset rsp 0)) ;;Get the value at the current position on the stack
+          ;;We assume the value is a tagged address to a chunk on the heap. If not, it will be found out down the line.
+          ;;Untag this address
+          (mov r15 rbx)
+          (and r15 ,result-type-mask)
+          ;;Check that the value from the stack has a chance of being a chunk on the heap by looking at its tag.
+          ;;Since the stack may contain junk that the program didn't put there, it is possible we encounter
+          ;;a tagged value that is not actually on the heap. This is taken care of by validating the address.
+          (cmp r15 ,type-list)
+          (je ,body)
+          (cmp r15 ,type-box)
+          (je ,body)
+          (cmp r15 ,type-range)
+          (je ,body)
+          (cmp r15 ,type-pair)
+          (je ,body)
+          (cmp r15 ,type-bignum)
+          (je ,body)
+          (jmp ,continue) ;;Not tagged like a chunk on the heap, cannot be a chunk on the heap
+          
 
-          (mov rdi rax)
+           ,body
+          (and rbx ,clear-tag) 
+         
+          (sub rbx (offset rbp 2))
+          (add rsi rbx) ;;rsi now points to the byte in the map beginning from which the next 8 bytes gives the new address of the value in the heap
+     
+          (mov rdi (offset rsi 0))
+          (or rdi r15)
           (mov rsp rbp)
-          (call printInt)
-          (add rsp 24)
-          (add rsp (offset rbp 3))
-          (mov rdi (offset rsp 0))
-          (add rdi rsi)
-          (mov rdi (offset rdi 0))
-          (mov rsp rbp)
-          (call printResult)
+          (call printResult) ;;Print the value using its new address
+          
 
-          (mov rax (offset rbp 3))
+          ,continue
+          (mov rax (offset rbp 4))
           (sub rax 8) ;;Each item on the stack is 8 bytes large
-          (mov (offset rbp 3) rax)
+          (mov (offset rbp 4) rax)
           (cmp rax 0)
           (jg ,loop)
           
           ,end
-          (mov rsp rbp)|#))
+          (mov rsp rbp)))
    
     ;;Pop the callee save registers
     (pop r15)
@@ -2143,13 +2168,18 @@ type Variable =
     ;;call completeCompaction
     (sub rsp ,stack-size) ;;rsp now contains the address of the topmost value on the stack
     (mov rbx ,stack-size) ;;The number of bytes on the stack. This only counts program specific values, not those placed on the stack to obey calling conventions
+    (sub rbx 16) ;;Ignore address of the beginning of the heap and the size of the heap
     (mov (offset rsp -1) rbx) ;;Make the number of bytes on the stack the first argument
     (xor rax ,type-map)
     (mov (offset rsp -2) rax) ;;Make the untagged address of the map the second argument
-    (sub rsp 16)
+    (add rsp ,stack-size)
+    (mov rbx (offset rsp -1)) ;;Make the address of the beginning of the heap the third argument
+    (sub rsp ,stack-size)
+    (mov (offset rsp -3) rbx) 
+    (sub rsp 24)
     ;;Alongside completing the compaction process, the address to the requested chunk whick kicked of the compaction should be returned in rax
     (call completeCompaction)
-    (add rsp 16)
+    (add rsp 24)
     (add rsp ,stack-size)
     (jmp ,continue)))
 

@@ -93,8 +93,7 @@ int64_t allocateChunk(short size) {
 				chunk = next_free_pos_in_heap;
 				next_free_pos_in_heap += size;
 			} else {
-				assert((map % 8) == 0);
-				printf("Map: %" PRId64 "\n", map);
+				assert((map % 8) == 0); 
 				return (map | type_map);
 				//memError("The request can be satisfied after compaction");
 

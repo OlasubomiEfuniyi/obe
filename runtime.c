@@ -2,7 +2,7 @@
 #include "runtime.h"
 #include "mem.h"
 
-int64_t entry(void* heap, void* heap_start_addr, int64_t h_size);
+int64_t entry(void* heap_start_addr, int64_t h_size);
 void printResult(int64_t value);
 void printBignum(int64_t value);
 void printList(int64_t value);
@@ -27,7 +27,7 @@ int main(int argc, char** argv) {
 	}
 
 	/* Entry may either return a 64 bit value via a register or a pointer to a result */
-	int64_t  value = entry(heap, heap, heap_size);
+	int64_t  value = entry(heap, heap_size);
 	
 	printResult(value);
 
