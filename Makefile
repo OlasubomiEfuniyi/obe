@@ -6,7 +6,7 @@
 # Use racket to initiate the main method of the compile-driver passing the
 # source file name ($<) as the filename argument to the main method and redirecting
 # the target the output to the target file name ($@)
-%.s: %.rkt
+%.s: %.rkt compiler.rkt
 	racket -t compile-driver.rkt  -m $< > $@
 
 # Use nasm to create a linkable object format of the source

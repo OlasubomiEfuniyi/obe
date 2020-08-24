@@ -28,8 +28,9 @@ int main(int argc, char** argv) {
 
 	/* Entry may either return a 64 bit value via a register or a pointer to a result */
 	int64_t  value = entry(heap, heap_size);
+	printf("Res %" PRId64 "\n", value);
 	
-	printResult(value);
+	//printResult(value);
 
 	GC_INFO("Free List:\n");
 	if(gc_info == true) {
@@ -49,7 +50,16 @@ void my_mpz_add(int64_t rop, int64_t op1, int64_t op2) {
 	assert(op1 % 8 == 0);
 	assert(op2 % 8 == 0);	
 
-	mpz_add(*((mpz_t *)rop), *((mpz_t*)(((int64_t*)op1) + 1)), *((mpz_t*)(((int64_t *)op2) + 1)));
+	printf("\nrop: %" PRId64 "\n", rop);
+	printf("op1: %" PRId64 "\n", op1);
+	printf("op2: %" PRId64 "\n", op2);
+	printBignum(op1 | type_bignum);
+	printf("\n");
+	printBignum(op2 | type_bignum);
+	printf("\n");
+	//printBignum(op2);
+	//mpz_add(*((mpz_t *)rop), *((mpz_t*)(((int64_t*)op1) + 1)), *((mpz_t*)(((int64_t *)op2) + 1)));
+	printf("Addition finished\n");
 }
 
 /* Increment the untagged pointer to a bignum, storing the result in res */

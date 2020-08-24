@@ -5,6 +5,7 @@
 #include <assert.h>
 #include <string.h>
 #include "mem.h"
+#include "runtime.h"
 
 #define type_chunk 0b000
 #define type_map 0b001
@@ -87,12 +88,14 @@ int64_t allocateChunk(short size) {
 			}
 
 		} else if(num_bytes_seen >= size) { //The request can be satisfied after compaction
+			GC_INFO("About to compact the heap\n");
 			int64_t map = compact(num_bytes_seen);
 			
 			if(map == 0) { //Nothing was moved. The entire heap contained garbage
 				chunk = next_free_pos_in_heap;
 				next_free_pos_in_heap += size;
 			} else {
+				printf("Map: %" PRId64 "\n", map);
 				assert((map % 8) == 0); 
 				return (map | type_map);
 				//memError("The request can be satisfied after compaction");
@@ -149,7 +152,8 @@ int64_t compact(int64_t num_garbage_bytes) {
 			//Continue to copy non garbage contiguous chunks into temp_heap until all garbage has been ignored
 			size_t bytesToCopy = (size_t)((curr_free_list -> start) - (int64_t)curr_heap);
 		
-			memcpy((void*)curr_temp_heap, (void*)curr_heap, bytesToCopy);
+			memcpy((void*)curr_temp_heap, (void*)curr_heap, bytesToCopy);	
+
 			
 			i = (int64_t)curr_heap; //Used to calculate the index of the map
 			v = (int64_t)curr_temp_heap; //The value to be placed at the index	
@@ -187,6 +191,19 @@ int64_t compact(int64_t num_garbage_bytes) {
 
 		//Copy over the temp heap into the heap
 		memcpy((void*)heap, (void*) temp_heap, temp_heap_size);
+		
+		
+		printf("Start: %" PRId64 "\n", (int64_t)heap + 0);
+		printf("End: %" PRId64 "\n", (int64_t)heap + 24);
+		printf("Step: %" PRId64 "\n", (int64_t)heap + 48);
+		printf("ROP: %" PRId64 "\n", (int64_t)heap + 104);
+		printValue(((int64_t)heap + 0) | type_bignum);
+		printf("\n");
+		printValue(((int64_t)heap + 24) | type_bignum);
+		printf("\n");
+		printValue(((int64_t)heap + 48) | type_bignum);
+		printf("\n");
+
 		next_free_pos_in_heap = (int64_t)heap + temp_heap_size;
 		
 		free(temp_heap);

@@ -286,18 +286,21 @@ type Variable =
     (push r15)
 
     ;;Fix the pointers
-    (mov rax (offset rbp 4)) ;;Get the number of bytes on the stack being corrected
     (mov rsi (offset rbp 3)) ;;Get the untagged address of the map that will be used for the correction
-
+    #|(mov rdi rsi)
+    (call printInt)|#
+    (mov rax (offset rbp 4)) ;;Get the number of bytes on the stack being corrected (positive offest used to go into the stack of prev function)
+    (mov r14 rsp) ;;Save the address of the top of the stack
     ,@(let ((loop (gensym "loop"))
             (end (gensym "end"))
             (continue (gensym "continue"))
             (body (gensym "body")))
         `(;;Continue to loop until each individual value on the stack is explored
           (cmp rax 0)
-          ;;(jle ,end)
+          (jle ,end)
 
           ,loop
+          (mov rsi (offset rbp 3)) ;;reset rsi to the beginning of the map
           (mov rsp rbp) ;;reset rsp to the base of this functions stack
           (add rsp 32) ;;Ignore the ret address and the three arguments
           (add rsp rax) ;;rsp now contains the address on the stack of the next value on the stack to be examined
@@ -306,6 +309,11 @@ type Variable =
           (mov rbx (offset rsp 0)) ;;Get the value at the current position on the stack
           ;;We assume the value is a tagged address to a chunk on the heap. If not, it will be found out down the line.
           ;;Untag this address
+          #|(mov rdi rbx)
+          (mov r15 rsp)
+          (mov rsp r14)
+          (call printInt)
+          (mov rsp r15)|#
           (mov r15 rbx)
           (and r15 ,result-type-mask)
           ;;Check that the value from the stack has a chance of being a chunk on the heap by looking at its tag.
@@ -328,15 +336,26 @@ type Variable =
           (and rbx ,clear-tag) 
          
           (sub rbx (offset rbp 2))
+          #|(mov rdi rbx)
+          (mov r12 rsp)
+          (mov rsp r14)
+          (call printInt)
+          (mov rsp r12)|#
           (add rsi rbx) ;;rsi now points to the byte in the map beginning from which the next 8 bytes gives the new address of the value in the heap
      
-          (mov rdi (offset rsi 0))
-          (or rdi r15)
-          (mov rsp rbp)
-          (call printResult) ;;Print the value using its new address
+          (mov rdi (offset rsi 0)) ;;Get the new address
+          #|(mov r12 rsp)
+          (mov rsp r14)
+          (call printInt)
+          (mov rsp r12)|#
+          (or rdi r15) ;;Tag the new address with the same tag as the old address
+          (mov (offset rsp 0) rdi) ;;Replace the old address to the heap with the new address to the heap
           
-
           ,continue
+          #|(mov r15 rsp)
+          (mov rsp r14)
+          (call printInt)
+          (mov rsp r15)|#
           (mov rax (offset rbp 4))
           (sub rax 8) ;;Each item on the stack is 8 bytes large
           (mov (offset rbp 4) rax)
@@ -344,8 +363,9 @@ type Variable =
           (jg ,loop)
           
           ,end
-          (mov rsp rbp)))
-   
+          (mov rsp r14)
+          (mov rax (offset rbp 2))
+          (add rax 104)))
     ;;Pop the callee save registers
     (pop r15)
     (pop r14)
@@ -622,7 +642,7 @@ type Variable =
       ,continue5
       (mov rdi rax)
       (mov (offset rsp ,(- (+ 5 (length env)))) rdi) ;;Save the address of the bignum to be represented by v on the stack
-      
+
       ;;Initialize the reference count of the bignum that will be placed on the stack by increment to 1 (not 0 since we are going to increment it anyways).
       ;;It is initialized to 1 because the for loop has a reference to it which it will loose and therefore
       ;;cause it to be decremented. If at the point it is decremented, only the for loop has a reference to it,
@@ -648,7 +668,6 @@ type Variable =
       (sub rsp ,stack-size)
       (call my_mpz_add)
       (add rsp ,stack-size) ;;Restore the stack
-      
       
       ;;Decrement the reference count of the old value of v, possibly causing it to be garbage collected
       (mov rax (offset rsp ,(- (add1 (length env)))))
@@ -2177,7 +2196,7 @@ type Variable =
     (sub rsp ,stack-size)
     (mov (offset rsp -3) rbx) 
     (sub rsp 24)
-    ;;Alongside completing the compaction process, the address to the requested chunk whick kicked of the compaction should be returned in rax
+    ;;Alongside completing the compaction process, the address to the requested chunk which kicked of the compaction should be returned in rax
     (call completeCompaction)
     (add rsp 24)
     (add rsp ,stack-size)
