@@ -11,7 +11,7 @@
 #define type_map 0b001
 
 void memError(const char* msg);
-int64_t compact(int64_t num_garbage_bytes);
+int64_t startCompaction(int64_t num_garbage_bytes);
 bool in_free_list(int64_t addr);
 
 struct Chunk {
@@ -28,6 +28,9 @@ int64_t* heap = NULL;
 int64_t* map = NULL;
 int64_t next_free_pos_in_heap = 0;
 int64_t end_address = -1;
+//This field should be updated upon every new request to allocate memory. That way, if compaction takes place and completeCompation makes a call to finishCompaction,
+//the next_free_pos_in_heap can be updated appropriately.
+short last_request = -1; 
 
 /* This function creates the heap and returns a pointer to it */
 int64_t* init_heap() {
@@ -44,6 +47,8 @@ int64_t* init_heap() {
 
 /* Allocate space on the heap for a chunk of the given size */
 int64_t allocateChunk(short size) {
+	last_request = size;
+
 	assert((size % 8)  == 0); //Make sure the addresses are kept as multiple of 8 bytes
 	int64_t chunk = 0;
 
@@ -88,14 +93,14 @@ int64_t allocateChunk(short size) {
 			}
 
 		} else if(num_bytes_seen >= size) { //The request can be satisfied after compaction
-			GC_INFO("About to compact the heap\n");
-			int64_t map = compact(num_bytes_seen);
+		
+			int64_t map = startCompaction(num_bytes_seen);
 			
 			if(map == 0) { //Nothing was moved. The entire heap contained garbage
 				chunk = next_free_pos_in_heap;
 				next_free_pos_in_heap += size;
 			} else {
-				printf("Map: %" PRId64 "\n", map);
+				//printf("Map: %" PRId64 "\n", map);
 				assert((map % 8) == 0); 
 				return (map | type_map);
 				//memError("The request can be satisfied after compaction");
@@ -123,10 +128,12 @@ int64_t allocateChunk(short size) {
 	return (chunk | type_chunk);
 }
 
-int64_t compact(int64_t num_garbage_bytes) {
+int64_t startCompaction(int64_t num_garbage_bytes) {
+	GC_INFO("Started Compaction\n");
+
 	size_t temp_heap_size = heap_size - num_garbage_bytes; 
 	assert(temp_heap_size >= 0);
-
+	
 	if(temp_heap_size > 0) {//Then there is something to be kept
 		if(map == NULL) { //map has never been created
 			map = (int64_t*)malloc(heap_size);
@@ -193,7 +200,7 @@ int64_t compact(int64_t num_garbage_bytes) {
 		memcpy((void*)heap, (void*) temp_heap, temp_heap_size);
 		
 		
-		printf("Start: %" PRId64 "\n", (int64_t)heap + 0);
+		/*printf("Start: %" PRId64 "\n", (int64_t)heap + 0);
 		printf("End: %" PRId64 "\n", (int64_t)heap + 24);
 		printf("Step: %" PRId64 "\n", (int64_t)heap + 48);
 		printf("ROP: %" PRId64 "\n", (int64_t)heap + 104);
@@ -202,10 +209,11 @@ int64_t compact(int64_t num_garbage_bytes) {
 		printValue(((int64_t)heap + 24) | type_bignum);
 		printf("\n");
 		printValue(((int64_t)heap + 48) | type_bignum);
-		printf("\n");
+		printf("\n");*/
 
 		next_free_pos_in_heap = (int64_t)heap + temp_heap_size;
-		
+		free_list = NULL; //after compaction, there is no more space on the free list
+	
 		free(temp_heap);
 		return (int64_t)map;
 	} else {
@@ -213,6 +221,16 @@ int64_t compact(int64_t num_garbage_bytes) {
 		next_free_pos_in_heap = (int64_t)heap;
 		return 0;
 	}
+}
+
+int64_t finishCompaction() {
+	int64_t result = next_free_pos_in_heap;
+	
+	assert(((int64_t)heap <= (next_free_pos_in_heap + last_request)) && ((next_free_pos_in_heap + last_request) <= end_address));
+	next_free_pos_in_heap += last_request;
+
+	GC_INFO("Finished compaction\n");
+	return result;
 }
 
 /* Exit with an error */

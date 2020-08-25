@@ -366,6 +366,10 @@ type Variable =
           (mov rsp r14)
           (mov rax (offset rbp 2))
           (add rax 104)))
+
+    ;;Finish the compaction process
+    (call finishCompaction)
+    
     ;;Pop the callee save registers
     (pop r15)
     (pop r14)
@@ -618,16 +622,17 @@ type Variable =
 
       (mov (offset rsp ,(- (+ 7 len))) rdx) ;;Save whatever is in rdx
       (mov rdx (offset r15 3)) ;;Move the step value into rdx
-      (xor rdx ,type-bignum) ;;Untag the address to the bignum
+      
       
       ;;Always make sure that the current value of v is at offset 1 from the top of the stack and
       ;;the end of the range is at offset 2 at the top of the stack.
+      ;;NOTE: All pointers to chunks save on the stack must be tagged to ensure they are updated if compaction happens.
       (mov (offset rsp ,(- (add1 (length env)))) rbx)
       (mov (offset rsp ,(- (+ 2 (length env)))) rax)
       (mov (offset rsp ,(- (+ 3 (length env)))) rdi)
       (mov (offset rsp ,(- (+ 4 (length env)))) rsi)
       (mov (offset rsp ,(- (+ 8 len))) rdx) ;;Save the step value on the stack
-      
+
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Iterate;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       ,loop
       
@@ -641,8 +646,10 @@ type Variable =
       ,@(complete-allocation continue5 stack-size)
       ,continue5
       (mov rdi rax)
+      (or rdi ,type-bignum) ;;Follow the protocol of tagging addresses to chunks placed on the heap
       (mov (offset rsp ,(- (+ 5 (length env)))) rdi) ;;Save the address of the bignum to be represented by v on the stack
-
+      (xor rdi ,type-bignum)
+      
       ;;Initialize the reference count of the bignum that will be placed on the stack by increment to 1 (not 0 since we are going to increment it anyways).
       ;;It is initialized to 1 because the for loop has a reference to it which it will loose and therefore
       ;;cause it to be decremented. If at the point it is decremented, only the for loop has a reference to it,
@@ -658,12 +665,14 @@ type Variable =
       (add rsp ,stack-size)
 
       ;;Add the step value to the old value of v
-      (mov rdi (offset rsp ,(- (+ 5 len)))) ;;The first argument is an untagged pointer to a position on the heap where the resulting
+      (mov rdi (offset rsp ,(- (+ 5 len)))) ;;The first argument is a tagged pointer to a position on the heap where the resulting
                     ;;GMP struct should ge placed
+      (xor rdi ,type-bignum)
       (add rdi 8) ;;make rdi point to the next free position i.e after the reference count
       (mov rsi (offset rsp ,(- (add1 (length env))))) ;;The second argument is the bignum to be incremented
       (xor rsi ,type-bignum) ;;Untag the address of the the bignum to be incremented
-      (mov rdx (offset rsp ,(- (+ 8 len)))) ;;The pointer was untagged before saving it on the stack
+      (mov rdx (offset rsp ,(- (+ 8 len))))
+      (xor rdx ,type-bignum)
       
       (sub rsp ,stack-size)
       (call my_mpz_add)
@@ -674,9 +683,8 @@ type Variable =
       ,@(decrement-ref-count continue2 stack-size #t)
       ,continue2
 
-      ;;Place the new value of v on the stack
+      ;;Replace the old value of v on the stack with the new value of v
       (mov rax (offset rsp ,(- (+ 5 (length env)))))
-      (or rax ,type-bignum)
       (mov (offset rsp ,(- (add1 (length env)))) rax)
       
       ;;Compare the new value of v to the end of the range

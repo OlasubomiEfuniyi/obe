@@ -1,6 +1,6 @@
 #include <inttypes.h>
 
-#define heap_size 128
+#define heap_size 152
 
 #ifndef GC_INFO
 	#define GC_INFO(...) (gc_info && printf(__VA_ARGS__))

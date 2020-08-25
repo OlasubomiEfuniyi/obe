@@ -28,9 +28,8 @@ int main(int argc, char** argv) {
 
 	/* Entry may either return a 64 bit value via a register or a pointer to a result */
 	int64_t  value = entry(heap, heap_size);
-	printf("Res %" PRId64 "\n", value);
 	
-	//printResult(value);
+	printResult(value);
 
 	GC_INFO("Free List:\n");
 	if(gc_info == true) {
@@ -49,17 +48,19 @@ void my_mpz_add(int64_t rop, int64_t op1, int64_t op2) {
 	assert(rop % 8 == 0);
 	assert(op1 % 8 == 0);
 	assert(op2 % 8 == 0);	
-
+	
+	/*printf("In my_mpz_add");
 	printf("\nrop: %" PRId64 "\n", rop);
 	printf("op1: %" PRId64 "\n", op1);
 	printf("op2: %" PRId64 "\n", op2);
+	//printBignum(rop | type_bignum);
+	//printf("\n");
 	printBignum(op1 | type_bignum);
 	printf("\n");
 	printBignum(op2 | type_bignum);
-	printf("\n");
-	//printBignum(op2);
-	//mpz_add(*((mpz_t *)rop), *((mpz_t*)(((int64_t*)op1) + 1)), *((mpz_t*)(((int64_t *)op2) + 1)));
-	printf("Addition finished\n");
+	printf("\n");*/
+	mpz_add(*((mpz_t *)rop), *((mpz_t*)(((int64_t*)op1) + 1)), *((mpz_t*)(((int64_t *)op2) + 1)));
+	//printf("Addition finished\n");
 }
 
 /* Increment the untagged pointer to a bignum, storing the result in res */
@@ -192,11 +193,11 @@ void printValue(int64_t value) {
 	
 	switch(value & result_type_mask) {
 	case type_bignum:
-		printf("I am a bignum\n");			
+		//printf("I am a bignum\n");			
 		printBignum(value);	
 		break;
 	case type_list:
-		printf("I am a list\n");
+		//printf("I am a list\n");
 		printf("(");
 		printList(value);
 		printf(")");
@@ -208,7 +209,7 @@ void printValue(int64_t value) {
 		printf(")");
 		break;
 	case type_imm:
-		printf("I am an immediate\n");
+		//printf("I am an immediate\n");
 		switch(value) {
 			case type_empty_list:
 				printf("()");
@@ -224,7 +225,7 @@ void printValue(int64_t value) {
 		}
 		break;
 	case type_range:
-		printf("I am a range\n");
+		//printf("I am a range\n");
 		GC_INFO("Ref Count: %" PRId64 " Value: ", *((int64_t *)(value ^ type_range)));
 		printf("(");
 		addr = ((int64_t *) (value ^ type_range)) + 1;
@@ -236,7 +237,7 @@ void printValue(int64_t value) {
 		printf(")");
 		break;
 	case type_box:
-		printf("I am a box\n");
+		//printf("I am a box\n");
 		GC_INFO("Ref Count: %" PRId64 " Value: ", *((int64_t*)(value ^ type_box)));
 		printf("#&");
 		printValue(*(((int64_t*)(value ^ type_box) + 1)));
