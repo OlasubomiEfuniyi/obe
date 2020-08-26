@@ -223,6 +223,83 @@ int64_t startCompaction(int64_t num_garbage_bytes) {
 	}
 }
 
+
+/* This function recursively updates the address to chunks on the heap contained within other chunks on the heap, starting from 
+start, an address to a chunk on the heap */
+void updateAddressOnHeap(int64_t start) {
+	if(validateAddr(start & clear_tag) == true) { //Make sure the address is a valid address on the heap
+		switch(start & result_type_mask) {
+			case type_bignum:
+				return;
+			case type_pair:
+				{
+				int64_t* start_p = (int64_t*) (start ^ type_pair);
+				int64_t old_first = *(start_p + 1);
+				int64_t old_second = *(start_p + 2);
+				int64_t old_first_tag = old_first & result_type_mask;
+				int64_t old_second_tag = old_second & result_type_mask;
+
+				*(start_p + 1) = map[((old_first & clear_tag) - (int64_t)heap)/sizeof(int64_t)] | old_first_tag;
+				*(start_p + 2) = map[((old_second & clear_tag) - (int64_t)heap)/sizeof(int64_t)] | old_second_tag;
+				updateAddressOnHeap(*(start_p + 1));
+				updateAddressOnHeap(*(start_p + 2));
+				}
+				break;
+
+			case type_list:
+				{
+				int64_t* start_p = (int64_t*) (start ^ type_list);
+				int64_t old_head = *(start_p + 1);
+				int64_t old_tail = *(start_p + 2);
+				int64_t old_head_tag = old_head & result_type_mask;
+				int64_t old_tail_tag = old_tail & result_type_mask;
+
+				*(start_p + 1) = map[((old_head & clear_tag) - (int64_t)heap)/sizeof(int64_t)] | old_head_tag;
+				*(start_p + 2) = map[((old_tail & clear_tag) - (int64_t)heap)/sizeof(int64_t)] | old_tail_tag;
+				updateAddressOnHeap(*(start_p + 1));
+				updateAddressOnHeap(*(start_p + 2));
+				}
+				break;
+
+			case type_range:
+				{
+				int64_t* start_p = (int64_t*) (start ^ type_range);
+				int64_t old_start = *(start_p + 1);
+				int64_t old_end = *(start_p + 2);
+				int64_t old_step = *(start_p + 3);
+				int64_t old_start_tag = old_start & result_type_mask;
+				int64_t old_end_tag = old_end & result_type_mask;
+				int64_t old_step_tag = old_step & result_type_mask;
+
+				*(start_p + 1) = map[((old_start & clear_tag) - (int64_t)heap)/sizeof(int64_t)] | old_start_tag;
+				*(start_p + 2) = map[((old_end & clear_tag) - (int64_t)heap)/sizeof(int64_t)] | old_end_tag;
+				*(start_p + 3) = map[((old_step & clear_tag) - (int64_t)heap)/sizeof(int64_t)] | old_step_tag;
+				
+				
+				updateAddressOnHeap(*(start_p + 1));
+				updateAddressOnHeap(*(start_p + 2));
+				updateAddressOnHeap(*(start_p + 3));
+				}
+				break;
+			case type_box:
+				{
+				int64_t* start_p = (int64_t*) (start ^ type_box);
+				int64_t old_value = *(start_p + 1);
+				int64_t old_value_tag = old_value & result_type_mask;
+
+				*(start_p + 1) = map[((old_value & clear_tag) - (int64_t)heap)/sizeof(int64_t)] | old_value_tag;
+			
+				updateAddressOnHeap(*(start_p + 1));
+				} 
+				break;
+			default:
+				memError("Cannot recognize the tag");
+				break;
+		}
+	}
+}
+
+/* This function completes the process of compaction by setting the next_free_pos_in_heap appropriately */
 int64_t finishCompaction() {
 	int64_t result = next_free_pos_in_heap;
 	

@@ -109,14 +109,16 @@ void decrementRefCount(int64_t ref) {
         //and possibly triggering garbage collection.
         if(type != -1) { //Check that ref is a pointer to a chunk
                 int64_t* ref_p = (int64_t*) (ref ^ type);
-                *ref_p = *ref_p - 1; //Decrement the ref count of the chunk
-                if(*ref_p == 0) {
-                        GC_INFO("Will garbage collect: ");
-                        if(gc_info == true) {
-                                printValue(ref);
-                                printf("\n");
-                        }
-                        garbageCollect(ref);
+                if(validateAddr(ref ^ type)) {
+			*ref_p = *ref_p - 1; //Decrement the ref count of the chunk
+                	if(*ref_p == 0) {
+                        	GC_INFO("Will garbage collect: ");
+                        	if(gc_info == true) {
+                                	printValue(ref);
+                                	printf("\n");
+                        	}
+                        	garbageCollect(ref);
+			}
                 }
         }
 

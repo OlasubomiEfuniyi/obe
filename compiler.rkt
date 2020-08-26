@@ -287,10 +287,9 @@ type Variable =
 
     ;;Fix the pointers
     (mov rsi (offset rbp 3)) ;;Get the untagged address of the map that will be used for the correction
-    #|(mov rdi rsi)
-    (call printInt)|#
     (mov rax (offset rbp 4)) ;;Get the number of bytes on the stack being corrected (positive offest used to go into the stack of prev function)
     (mov r14 rsp) ;;Save the address of the top of the stack
+    
     ,@(let ((loop (gensym "loop"))
             (end (gensym "end"))
             (continue (gensym "continue"))
@@ -309,11 +308,6 @@ type Variable =
           (mov rbx (offset rsp 0)) ;;Get the value at the current position on the stack
           ;;We assume the value is a tagged address to a chunk on the heap. If not, it will be found out down the line.
           ;;Untag this address
-          #|(mov rdi rbx)
-          (mov r15 rsp)
-          (mov rsp r14)
-          (call printInt)
-          (mov rsp r15)|#
           (mov r15 rbx)
           (and r15 ,result-type-mask)
           ;;Check that the value from the stack has a chance of being a chunk on the heap by looking at its tag.
@@ -336,26 +330,17 @@ type Variable =
           (and rbx ,clear-tag) 
          
           (sub rbx (offset rbp 2))
-          #|(mov rdi rbx)
-          (mov r12 rsp)
-          (mov rsp r14)
-          (call printInt)
-          (mov rsp r12)|#
           (add rsi rbx) ;;rsi now points to the byte in the map beginning from which the next 8 bytes gives the new address of the value in the heap
      
           (mov rdi (offset rsi 0)) ;;Get the new address
-          #|(mov r12 rsp)
-          (mov rsp r14)
-          (call printInt)
-          (mov rsp r12)|#
           (or rdi r15) ;;Tag the new address with the same tag as the old address
           (mov (offset rsp 0) rdi) ;;Replace the old address to the heap with the new address to the heap
+          (mov r15 rsp)
+          (mov rsp r14)
+          (call updateAddressOnHeap)
+          (mov rsp r15)
           
           ,continue
-          #|(mov r15 rsp)
-          (mov rsp r14)
-          (call printInt)
-          (mov rsp r15)|#
           (mov rax (offset rbp 4))
           (sub rax 8) ;;Each item on the stack is 8 bytes large
           (mov (offset rbp 4) rax)
@@ -363,9 +348,7 @@ type Variable =
           (jg ,loop)
           
           ,end
-          (mov rsp r14)
-          (mov rax (offset rbp 2))
-          (add rax 104)))
+          (mov rsp r14)))
 
     ;;Finish the compaction process
     (call finishCompaction)
