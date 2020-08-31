@@ -288,6 +288,9 @@ type Variable =
     ;;Fix the pointers
     (mov rsi (offset rbp 3)) ;;Get the untagged address of the map that will be used for the correction
     (mov rax (offset rbp 4)) ;;Get the number of bytes on the stack being corrected (positive offest used to go into the stack of prev function)
+    (mov rdi rax)
+    (call printInt)
+    (mov rax (offset rbp 4))
     (mov r14 rsp) ;;Save the address of the top of the stack
     
     ,@(let ((loop (gensym "loop"))
@@ -418,6 +421,7 @@ type Variable =
 ;;Expr CEnv -> ASM
 (define (compile-box e1 env)
   (let ((continue (gensym "continue"))
+        (continue2 (gensym "continue"))
         (len (length env))
         (stack-size (* 8 (+ 2 (length env)))))
     `(
@@ -434,6 +438,8 @@ type Variable =
       (sub rsp ,stack-size)
       (call allocateChunk)
       (add rsp ,stack-size)
+      ,@(complete-allocation continue2 stack-size)
+      ,continue2
       (mov rdi rax) ;;Get the address where the chunk is to begin into rdi
       
       ;;Initialize the reference count of the box to 0 since we do not know whether the box is being refernced by variable
@@ -935,7 +941,8 @@ type Variable =
         (len (length env))
         (stack-size (* 8 (+ 3 (length env))))
         (continue1 (gensym "continue"))
-        (continue2 (gensym "continue")))
+        (continue2 (gensym "continue"))
+        (continue3 (gensym "continue")))
     `(,@c1
       ;;The list/pair holds a reference to value e1 evaluates to. It is the head/first of the structure
       ,@(increment-ref-count continue1)
@@ -954,6 +961,8 @@ type Variable =
       (sub rsp ,stack-size)
       (call allocateChunk)
       (add rsp ,stack-size)
+      ,@(complete-allocation continue3 stack-size)
+      ,continue3
       (mov rdi rax)
    
       (mov rbx 0)
@@ -1101,13 +1110,14 @@ type Variable =
         (continue2 (gensym "continue"))
         (continue3 (gensym "continue"))
         (continue4 (gensym "continue"))
-        (continue5 (gensym "continue")))
+        (continue5 (gensym "continue"))
+        (continue6 (gensym "continue"))
+        (continue7 (gensym "continue")))
     `(,@c1
       ,@assert-bignum
       ;;This range will have a reference to the bignum that inidicates the start of the range
       ,@(increment-ref-count continue1)
       ,continue1
-      (xor rax ,type-bignum) ;;Untag the pointer to the bignum
       (mov (offset rsp ,(- (add1 (length env)))) rax) ;;save the starting point of the range on the stack
 
       ,@c2
@@ -1117,20 +1127,19 @@ type Variable =
       ;;If the reference count falls to 0 in the process, the bignum can then be garbage collected
       ,@(increment-ref-count continue2)
       ,continue2
-      (xor rax ,type-bignum) ;;Untag the pointer to the bignum
       (mov (offset rsp ,(- (+ 2 (length env)))) rax) ;;save the ending point of the range on the stack
 
       ,@c3
       ,@assert-bignum
       ,@(increment-ref-count continue3)
       ,continue3
-      (xor rax ,type-bignum) ;;Untag the pointer to the bignum
       (mov (offset rsp ,(- (+ 3 (length env)))) rax) ;;save the step value on the stack
 
       (mov (offset rsp ,(- (+ 6 (length env)))) rdi)
       (mov (offset rsp ,(- (+ 5 (length env)))) rsi)
       ;;;;;;;;;;;;;;;;Make sure the step value is positive;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-      (mov rdi rax)
+      (mov rdi (offset rsp ,(- (+ 3 (length env)))))
+      (xor rdi ,type-bignum)
       (mov rsi 1)
       (sub rsp ,stack-size)
       (call compBignumSI)
@@ -1143,7 +1152,9 @@ type Variable =
       ;;Prep for call to compBignum
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;pass the starting point of the range in rdi
       (mov rsi (offset rsp ,(- (+ 2 (length env))))) ;;pass the ending point of the range in rsi
-
+      (xor rdi ,type-bignum)
+      (xor rsi ,type-bignum)
+      
       (sub rsp ,stack-size)
       (call compBignum)
       (add rsp ,stack-size)
@@ -1158,11 +1169,15 @@ type Variable =
       (sub rsp ,stack-size)
       (call allocateChunk)
       (add rsp ,stack-size)
+      ,@(complete-allocation continue6 stack-size)
+      ,continue6
       (mov (offset rsp ,(- (+ 4 len))) rax) ;;Save the addres to the beginning of the range on the stack
       (mov rdi 24)
       (sub rsp ,stack-size)
       (call allocateChunk)
       (add rsp ,stack-size)
+      ,@(complete-allocation continue7 stack-size)
+      ,continue7
       (mov (offset rsp ,(- (+ 7 len))) rax) ;;Save the address to the beginning of the decremented end of the range on the stack
       
       
@@ -1181,12 +1196,17 @@ type Variable =
 
       ;;Decrement the end of the range
       (mov rdi (offset rsp ,(- (+ 2 (length env)))))
+      (xor rdi type-bingum)
       (mov rsi (offset rsp ,(- (+ 7 (length env)))))
       (add rsi 8) ;;Skip reference count
       (sub rsp ,stack-size)
       (call decrement)
       (add rsp ,stack-size) ;;Restore the stack
-      
+
+      ;;Tag the new end of the range
+      (mov rax (offset rsp ,(- (+ 7 (length env)))))
+      (or rax ,type-bignum)
+      (mov (offset rsp ,(- (+ 7 (length env)))) rax)
 
       ;;Decrement the reference count of the initial ending bignum, possibly garbage collecting it
       (mov rax (offset rsp ,(- (+ 2 (length env)))))
@@ -1200,18 +1220,15 @@ type Variable =
       (mov (offset rdi 0) rbx) ;;Set the reference count of this range to 0
       
       (mov rax (offset rsp ,(- (add1 (length env)))))
-      (or rax ,type-bignum)
       (mov (offset rdi 1) rax)
       
       (mov rax (offset rsp ,(- (+ 7 (length env))))) ;;Get the pointer to the decremented bignum
-      (or rax ,type-bignum) ;;Tag the bignum
       ,@(increment-ref-count continue5)
       ,continue5
       (mov (offset rdi 2) rax)
 
       ;;Place the step value after the start and end value on the heap
       (mov rax (offset rsp ,(- (+ 3 (length env)))))
-      (or rax ,type-bignum)
       (mov (offset rdi 3) rax)
 
       (mov rax rdi)
@@ -1231,13 +1248,13 @@ type Variable =
         (stack-size (* 8 (+ 5 (length env))))
         (continue1 (gensym "continue"))
         (continue2 (gensym "continue"))
-        (continue3 (gensym "continue")))
+        (continue3 (gensym "continue"))
+        (continue4 (gensym "continue")))
     `(,@c1
       ,@assert-bignum
       ;;This range will have a reference to the bignum representing the start of the range
       ,@(increment-ref-count continue1)
       ,continue1
-      (xor rax ,type-bignum) ;;Untag the pointer to the bignum
       (mov (offset rsp ,(- (add1 (length env)))) rax) ;;save the starting point of the range on the stack
 
       ,@c2
@@ -1245,7 +1262,6 @@ type Variable =
       ;;This range will have a reference to the bignum representing the end of the range
       ,@(increment-ref-count continue2)
       ,continue2
-      (xor rax ,type-bignum) ;;Untag the pointer to the bignum
       (mov (offset rsp ,(- (+ 2 (length env)))) rax) ;;save the ending point of the range on the stack
 
       ,@c3
@@ -1253,14 +1269,14 @@ type Variable =
       ;;This range will have a reference to the bignum representing the step value of the range
       ,@(increment-ref-count continue3)
       ,continue3
-      (xor rax ,type-bignum) ;;Untag the pointer to the bignum
       (mov (offset rsp ,(- (+ 3 (length env)))) rax) ;;save the step value of the range on the stack
 
       (mov (offset rsp ,(- (+ 4 (length env)))) rdi)
       (mov (offset rsp ,(- (+ 5 (length env)))) rsi)
       
       ;;;;;;;;;;;;;;;;Make sure the step value is positive;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-      (mov rdi rax)
+      (mov rdi (offset rsp ,(- (+ 3 (length env)))))
+      (xor rdi ,type-bignum)
       (mov rsi 1)
       (sub rsp ,stack-size)
       (call compBignumSI)
@@ -1274,6 +1290,8 @@ type Variable =
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;pass the starting point of the range in rdi
       (mov rsi (offset rsp ,(- (+ 2 (length env))))) ;;pass the ending point of the range in rsi
 
+      (xor rdi ,type-bignum)
+      (xor rsi ,type-bignum)
       (sub rsp ,stack-size)
       (call compBignum)
       (add rsp ,stack-size)
@@ -1288,6 +1306,8 @@ type Variable =
       (sub rsp ,stack-size)
       (call allocateChunk)
       (add rsp ,stack-size)
+      ,@(complete-allocation continue4 stack-size)
+      ,continue4
       (mov rdi rax)
       
       ;;Create the range on the heap and return a pointer to it.
@@ -1295,15 +1315,12 @@ type Variable =
       (mov (offset rdi 0) rbx);; Initialize the reference count of this range to 0
       
       (mov rax (offset rsp ,(- (add1 (length env)))))
-      (or rax ,type-bignum)
       (mov (offset rdi 1) rax)
       
       (mov rax (offset rsp ,(- (+ 2 (length env)))))
-      (or rax ,type-bignum)
       (mov (offset rdi 2) rax)
       
       (mov rax (offset rsp ,(- (+ 3 (length env)))))
-      (or rax ,type-bignum)
       (mov (offset rdi 3) rax)
 
       (mov rax rdi)
@@ -1336,7 +1353,9 @@ type Variable =
          (num-string-len (+ (string-length num-string-padded) 1))
          ;;Using the padded num-string ensures that rdi remains at an 8 byte boundary
          (num-list (string->list num-string-padded))
-         (stack-size (* 8 (+ 4 (length env)))))
+         (stack-size (* 8 (+ 4 (length env))))
+         (continue1 (gensym "continue"))
+         (continue2 (gensym "continue")))
     `(
       ;;Allocate space on the heap for the string representation of the bignum
       (mov (offset rsp ,(- (+ 2 (length env)))) rdi) ;;Save whatever was initially in rdi
@@ -1344,6 +1363,8 @@ type Variable =
       (sub rsp ,stack-size)
       (call allocateChunk)
       (add rsp ,stack-size)
+      ,@(complete-allocation continue1 stack-size)
+      ,continue1
       (mov rdi rax) ;;rdi now contains the address of the beginning of the string
       
       (mov (offset rsp ,(- (add1 (length env)))) rdi) ;;Save a pointer to the beginning of the string representation of the bignum to be freed later
@@ -1363,6 +1384,8 @@ type Variable =
       (sub rsp ,stack-size)
       (call allocateChunk)
       (add rsp ,stack-size)
+      ,@(complete-allocation continue2 stack-size)
+      ,continue2
       (mov (offset rsp ,(- (+ 4 (length env)))) rax) ;;Save address of the beginning of the bignum
       
       ;;Store arguments in the registers used to pass arguments to the function
@@ -1860,7 +1883,8 @@ type Variable =
         (continue1 (gensym "continue"))
         (continue2 (gensym "continue"))
         (continue3 (gensym "continue"))
-        (continue4 (gensym "continue")))
+        (continue4 (gensym "continue"))
+        (continue5 (gensym "continue")))
     `(,@c1
       ,@assert-bignum
       ;;Increment the reference count of the first argument if its a chunk. The reference count will be decremented just before the end of add,
@@ -1891,6 +1915,8 @@ type Variable =
       (sub rsp ,stack-size)
       (call allocateChunk)
       (add rsp ,stack-size)
+      ,@(complete-allocation continue5 stack-size)
+      ,continue5
       (mov rdi rax)
       (mov (offset rsp ,(- (+ 6 (length env)))) rdi) ;;Save address to new GMP struct
       
@@ -1948,7 +1974,8 @@ type Variable =
         (continue1 (gensym "continue"))
         (continue2 (gensym "continue"))
         (continue3 (gensym "continue"))
-        (continue4 (gensym "continue")))
+        (continue4 (gensym "continue"))
+        (continue5 (gensym "continue")))
     `(,@c1
       ,@assert-bignum
       ;;Increment the reference count of the first argument if its a chunk. The reference count will be decremented just before the end of add,
@@ -1979,6 +2006,8 @@ type Variable =
       (sub rsp ,stack-size)
       (call allocateChunk)
       (add rsp ,stack-size)
+      ,@(complete-allocation continue5 stack-size)
+      ,continue5
       (mov rdi rax)
       (mov (offset rsp ,(- (+ 6 (length env)))) rdi) ;;Save address to new GMP struct
       
