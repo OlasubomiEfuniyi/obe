@@ -288,9 +288,6 @@ type Variable =
     ;;Fix the pointers
     (mov rsi (offset rbp 3)) ;;Get the untagged address of the map that will be used for the correction
     (mov rax (offset rbp 4)) ;;Get the number of bytes on the stack being corrected (positive offest used to go into the stack of prev function)
-    (mov rdi rax)
-    (call printInt)
-    (mov rax (offset rbp 4))
     (mov r14 rsp) ;;Save the address of the top of the stack
     
     ,@(let ((loop (gensym "loop"))

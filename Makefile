@@ -1,3 +1,4 @@
+SHELL=/bin/bash
 
 # a special make target indicating all the other targets whose recipe do not 
 # create files and should be executed every time they are invoked
@@ -32,6 +33,7 @@ mem.o: mem.c mem.h
  
 # The - instructs make to continue even though a particular command fails. 
 clean:
-	-rm *.s
-	-rm *.o
-	-rm *.run
+	rm -f *.s
+	rm -f *.o
+	rm -f *.run
+	rm -f *.output
