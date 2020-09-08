@@ -11,7 +11,7 @@
 #define type_map 0b001
 
 void memError(const char* msg);
-int64_t startCompaction(int64_t num_garbage_bytes);
+int64_t startCompaction(int64_t num_garbage_bytes, int64_t num_bytes_before_end);
 bool in_free_list(int64_t addr);
 
 struct Chunk {
@@ -51,6 +51,8 @@ int64_t allocateChunk(short size) {
 
 	assert((size % 8)  == 0); //Make sure the addresses are kept as multiple of 8 bytes
 	int64_t chunk = 0;
+	
+	int64_t num_bytes_before_end = (next_free_pos_in_heap <= end_address) ? (end_address - next_free_pos_in_heap) : 0;
 
 	//Determine if there is enough space between the next free position on the heap
 	//and the end of the heap to satisfy the request
@@ -61,13 +63,13 @@ int64_t allocateChunk(short size) {
 			
 	} else { //We do not have enough space. Scan the free list
 		GC_INFO("Scanning free list for more space\n");
-		
-		struct Chunk* current = free_list;
-		struct Chunk* prev = NULL;
+	
 		//Keep track of the number of bytes that are free. If we cannot find a single contiguous
 		//chunk on the free list large enough to satisfy the request, but there are enough smaller chunks
 		//spread around that can together satisfy the request, we will compact.
-		int64_t num_bytes_seen = 0; 
+		int64_t num_bytes_seen = 0;	
+		struct Chunk* current = free_list;
+		struct Chunk* prev = NULL; 
 		
 		while(current != NULL) { //Find the first chunk on the free list that can satisfy the request
 			num_bytes_seen += (int64_t)(current->size);
@@ -92,9 +94,9 @@ int64_t allocateChunk(short size) {
 				free(current);
 			}
 
-		} else if(num_bytes_seen >= size) { //The request can be satisfied after compaction
+		} else if((num_bytes_seen + num_bytes_before_end) >= size) { //The request can be satisfied after compaction
 		
-			int64_t map = startCompaction(num_bytes_seen);
+			int64_t map = startCompaction(num_bytes_seen, num_bytes_before_end);
 			
 			if(map == 0) { //Nothing was moved. The entire heap contained garbage
 				chunk = next_free_pos_in_heap;
@@ -128,7 +130,7 @@ int64_t allocateChunk(short size) {
 	return (chunk | type_chunk);
 }
 
-int64_t startCompaction(int64_t num_garbage_bytes) {
+int64_t startCompaction(int64_t num_garbage_bytes, int64_t num_bytes_before_end) {
 	GC_INFO("Started Compaction\n");
 
 	size_t temp_heap_size = heap_size - num_garbage_bytes; 
@@ -211,7 +213,7 @@ int64_t startCompaction(int64_t num_garbage_bytes) {
 		printValue(((int64_t)heap + 48) | type_bignum);
 		printf("\n");*/
 
-		next_free_pos_in_heap = (int64_t)heap + temp_heap_size;
+		next_free_pos_in_heap = (int64_t)heap + temp_heap_size - num_bytes_before_end;
 		free_list = NULL; //after compaction, there is no more space on the free list
 	
 		free(temp_heap);
