@@ -86,12 +86,22 @@ int64_t allocateChunk(short size) {
 		if(current != NULL) { //A chunk was found on the free list that can satisfy the request
 			chunk = (current -> start);
 
-			//Remove current from the free list
-			if(prev == NULL) { //Curret is the head of the free list
-				free_list = free_list -> next;
+			//If the chunk on the free list exactly fulfils the request,
+			//take it of the free list as the entire space in now in use.
+			//Otherwise, the chunk on the free list was bigger than the request.
+			//Keep the remaining space as part of the free list
+			if((current->size) == size) { 
+				//Remove current from the free list
+				if(prev == NULL) { //Curret is the head of the free list
+					free_list = free_list -> next;
+				} else {
+					prev -> next = current -> next;
+					free(current);
+				}
 			} else {
-				prev -> next = current -> next;
-				free(current);
+				current -> start = (current -> start) + size;
+				current -> size = (current -> size) - size;
+				
 			}
 
 		} else if((num_bytes_seen + num_bytes_before_end) >= size) { //The request can be satisfied after compaction
@@ -309,6 +319,12 @@ int64_t finishCompaction() {
 	next_free_pos_in_heap += last_request;
 
 	GC_INFO("Finished compaction\n");
+	bytes_allocated += last_request;
+
+	if(gc_info == true) {
+		printf("Bytes allocated: %" PRId64 "\n", bytes_allocated);
+	}
+
 	return result;
 }
 

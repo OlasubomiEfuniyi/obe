@@ -29,8 +29,13 @@ void garbageCollect(int64_t ref) {
                         int64_t* ref_p = (int64_t*) (ref ^ type_list); //Get pointer to the ref count of the list
                         int64_t head = *(ref_p + 1); //get tagged pointer to the head of the list
                         decrementRefCount(head);
-                        int64_t tail = *(ref_p + 2); //get tagged pointer to the tail of the list
-                        decrementRefCount(tail);
+                        int64_t tail = *(ref_p + 2); //get tagged pointer to the tail of the list or get the empty list
+			
+			//If the tail of the list is another list, decrement its ref count
+			//possibly triggering its garbage collection. Otherwise, it is the
+			//empty list which has no ref count. It is automatically garbage.
+                       	 decrementRefCount(tail);
+
                         //Place the 24 bytes used by the cons back on the free list
                         addToFreeList((ref ^ type_list), 24);
 			

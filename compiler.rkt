@@ -1193,7 +1193,7 @@ type Variable =
 
       ;;Decrement the end of the range
       (mov rdi (offset rsp ,(- (+ 2 (length env)))))
-      (xor rdi type-bingum)
+      (xor rdi ,type-bignum)
       (mov rsi (offset rsp ,(- (+ 7 (length env)))))
       (add rsi 8) ;;Skip reference count
       (sub rsp ,stack-size)
