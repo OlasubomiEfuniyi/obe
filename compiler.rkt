@@ -27,6 +27,7 @@
 (define type-list #b011)
 (define type-pair #b100)
 (define type-range #b101)
+(define type-string #b110)
 
 ;;Immadiate Values
 (define type-true  (arithmetic-shift #b000 result-shift))
@@ -57,24 +58,22 @@ type Display =
 |`(println Expr)
 
 type Loop =
-|`(for Variable in Expr do Expr+) where the Expr after in is expected to evaluate to a range
+|(for Variable in Expr do Expr+) where the Expr after in is expected to evaluate to a range
 
 type Logic =
-|`(>  Expr Expr) where both arguments evaluate to a Number
-|`(< Number Number) where both arguments evaluate to a Number
-|`(>= Number Number) where both arguments evaluate to a Number
-|`(<= Number Number) where both arguments evaluate to a Number
-|`(= Expr Expr) ;;Structural equality
-|`(and Expr Expr) where both arguments evaluate to a Boolean
-|`(or Expr Expr) where both arguments evaluate to a Boolean
+|(>  Expr Expr) where both arguments evaluate to a Number
+|(< Number Number) where both arguments evaluate to a Number
+|(>= Number Number) where both arguments evaluate to a Number
+|(<= Number Number) where both arguments evaluate to a Number
+|(= Expr Expr) ;;Structural equality
 
 type ListOp =
-|`(head List)
-|`(tail List)
+|(head List)
+|(tail List)
 
 type PairOp =
-|`(first Pair)
-|`(second Pair)
+|(first Pair)
+|(second Pair)
 
 type Value =
 |Number
@@ -85,41 +84,51 @@ type Value =
 |(box Expr)
 
 type BoxOp =
-|`(unbox ,Expr) Where Expr evaluates to a value of type box
-|`(set ,Expr ,Expr) Where the first Expr evaluates to a value of type box and the second Expr evaluates to some value to be placed in the box
+|(unbox ,Expr) Where Expr evaluates to a value of type box
+|(set ,Expr ,Expr) Where the first Expr evaluates to a value of type box and the second Expr evaluates to some value to be placed in the box
 
 type Range =
-|`(.. Expr Expr) starting from first integer, not including the last integer, stepping by 1. Both expressions must evaluate to an integer
-|`(..= Expr Expr) starting from first integer, including the last integer, stepping 1. Both expressions must evaluate to an integer
-|`(.. Expr Expr Expr) starting from first integer, not including the last integer, stepping by the third integer. All three expressions must evaluate to integers
-|`(..= Expr Expr Expr) starting from first integer, including the last integer, stepping by the third integer. All three expressions must evaluate to integers
+|(.. Expr Expr) starting from first integer, not including the last integer, stepping by 1. Both expressions must evaluate to an integer
+|(..= Expr Expr) starting from first integer, including the last integer, stepping 1. Both expressions must evaluate to an integer
+|(.. Expr Expr Expr) starting from first integer, not including the last integer, stepping by the third integer. All three expressions must evaluate to integers
+|(..= Expr Expr Expr) starting from first integer, including the last integer, stepping by the third integer. All three expressions must evaluate to integers
 
 type List =
-|``(Expr*)
+|`(Expr*)
 
 type Pair =
 |(cons Expr Expr)
 
 type Arithmetic =
-|`(add Expr Expr) Both expressions must evaluate to an integer
-|`(sub Expr Expr) Both expressions must evaluate to an integer
+|(add Expr Expr) Both expressions must evaluate to an integer
+|(sub Expr Expr) Both expressions must evaluate to an integer
 
 type Decision =
-|`(if Expr Expr Expr)
+|(if Expr Expr Expr)
+|(match Expr MatchClause+)
+
+type MatchClause =
+|[pattern body+]
+
+type pattern =
+|Value
+
+type body =
+|Expr
 
 type Boolean =
-|`#t
-|`#f
+| #t
+| #f
 
 type Number =
 | integer
 
 type LetBinding =
-| `(let (Binding*) Expr+)
+|(let (Binding*) Expr+)
 
 type Binding =
-|`(Variable Expr)
-|`(Variable Variable Pair)
+|(Variable Expr)
+|(Variable Variable Pair)
 
 type Variable =
 |Symbol
@@ -201,7 +210,8 @@ type Variable =
 ;;Decision -> Decision
 (define (desugar-decision expr)
   (match expr
-    [`(if ,e1 ,e2 ,e3) `(if ,(desugar e1) ,(desugar e2) ,(desugar e3))]))
+    [`(if ,e1 ,e2 ,e3) `(if ,(desugar e1) ,(desugar e2) ,(desugar e3))]
+    [`(match ,expr ,(? match-clause? mcs)..1) `(match ,(desugar expr) ,@(map (λ (mc) (desugar mc)) mcs))]))
 
 ;;Desugar a logical expression
 ;;Logic -> Logic
@@ -322,6 +332,8 @@ type Variable =
           (cmp r15 ,type-pair)
           (je ,body)
           (cmp r15 ,type-bignum)
+          (je ,body)
+          (cmp r15 ,type-string)
           (je ,body)
           (jmp ,continue) ;;Not tagged like a chunk on the heap, cannot be a chunk on the heap
           
@@ -1168,18 +1180,23 @@ type Variable =
       (add rsp ,stack-size)
       ,@(complete-allocation continue6 stack-size)
       ,continue6
+      (or rax ,type-range)
       (mov (offset rsp ,(- (+ 4 len))) rax) ;;Save the addres to the beginning of the range on the stack
+      (xor rax ,type-range)
+      
       (mov rdi 24)
       (sub rsp ,stack-size)
       (call allocateChunk)
       (add rsp ,stack-size)
       ,@(complete-allocation continue7 stack-size)
       ,continue7
+      (or rax ,type-bignum)
       (mov (offset rsp ,(- (+ 7 len))) rax) ;;Save the address to the beginning of the decremented end of the range on the stack
-      
+      (xor rax ,type-bignum)
       
       ;;;;;;;;;;;;;;;;;Decrement the end of the range before placing it on the heap;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       (mov rdi (offset rsp ,(- (+ 7 (length env)))))
+      (xor rdi ,type-bignum)
       
       ;;Set the reference count of the new bignum to be made to 0
       (mov rbx 0)
@@ -1195,6 +1212,7 @@ type Variable =
       (mov rdi (offset rsp ,(- (+ 2 (length env)))))
       (xor rdi ,type-bignum)
       (mov rsi (offset rsp ,(- (+ 7 (length env)))))
+      (xor rsi ,type-bignum)
       (add rsi 8) ;;Skip reference count
       (sub rsp ,stack-size)
       (call decrement)
@@ -1202,7 +1220,6 @@ type Variable =
 
       ;;Tag the new end of the range
       (mov rax (offset rsp ,(- (+ 7 (length env)))))
-      (or rax ,type-bignum)
       (mov (offset rsp ,(- (+ 7 (length env)))) rax)
 
       ;;Decrement the reference count of the initial ending bignum, possibly garbage collecting it
@@ -1212,7 +1229,8 @@ type Variable =
       
       ;;Create the range on the heap and return a pointer to it.
       (mov rdi (offset rsp ,(- (+ 4 len))))
-
+      (xor rdi ,type-range)
+      
       (mov rbx 0)
       (mov (offset rdi 0) rbx) ;;Set the reference count of this range to 0
       
@@ -1228,8 +1246,7 @@ type Variable =
       (mov rax (offset rsp ,(- (+ 3 (length env)))))
       (mov (offset rdi 3) rax)
 
-      (mov rax rdi)
-      (or rax ,type-range)
+      (mov rax (offset rsp ,(- (+ 4 len))))
       (mov rdi (offset rsp ,(- (+ 6 len)))) ;;Restore rdi
       (mov rsi (offset rsp ,(- (+ 5 len)))) ;;Restore rsi
       )))
@@ -1348,30 +1365,50 @@ type Variable =
          ;;heap at a 64 bit boundry
          (num-string-padded (string-append num-string padding))
          (num-string-len (+ (string-length num-string-padded) 1))
+         (str-len (- num-string-len (+ 1 (string-length padding))))
          ;;Using the padded num-string ensures that rdi remains at an 8 byte boundary
          (num-list (string->list num-string-padded))
          (stack-size (* 8 (+ 4 (length env))))
          (continue1 (gensym "continue"))
-         (continue2 (gensym "continue")))
+         (continue2 (gensym "continue"))
+         (continue3 (gensym "continue")))
     `(
       ;;Allocate space on the heap for the string representation of the bignum
       (mov (offset rsp ,(- (+ 2 (length env)))) rdi) ;;Save whatever was initially in rdi
-      (mov rdi ,num-string-len) ;;Request num-string-len number of bytes. This is guaranteed to be a multiple of 8
+
+      ;;Request num-string-len + 24 number of bytes. This is guaranteed to be a multiple of 8.
+      ;;The extra 24 bytes are for the book keeping of the string.
+      (mov rdi ,(+ 24 num-string-len)) 
       (sub rsp ,stack-size)
       (call allocateChunk)
       (add rsp ,stack-size)
       ,@(complete-allocation continue1 stack-size)
       ,continue1
-      (mov rdi rax) ;;rdi now contains the address of the beginning of the string
-      
+      (mov rdi rax) ;;rdi now contains the address of the beginning of the string. The chunk was zeroed out by allocateChunk
+      (or rdi ,type-string) ;;tag the address as a string
       (mov (offset rsp ,(- (add1 (length env)))) rdi) ;;Save a pointer to the beginning of the string representation of the bignum to be freed later
+      (xor rdi ,type-string)
+
+      ;;Set the reference count of the string to 1
+      (mov rbx 1)
+      (mov (offset rdi 0) rbx)
+      ;;Place the length of the string on the heap. This length represents the number of
+      ;;bytes taken up by the string on the heap
+      (mov rbx ,num-string-len)
+      (mov (offset rdi 1) rbx)
+      ;;Place the actual length of the string on the heap.
+      (mov rbx ,str-len)
+      (mov (offset rdi 2) rbx)
+
+      (add rdi 24) ;;rdi now contains the address from which the characters that make up the string will begin.
       
       ;;Compile the list of characters representing the number. Each character will take up one byte
+      ;;NOTE: compile-char-list will generate ASM that updates rdi.
       ,@(compile-char-list num-list)
 
       ;;Null terminate the string
       (mov rbx 0)
-      (mov (offset rdi 0) rbx)
+      (mov (offset rdi 0) rbx) 
       
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Call the C function to compile a bignum into a GMP struct;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       (mov (offset rsp ,(- (+ 3 (length env)))) rsi) ;;Save whatever was initially in rsi
@@ -1383,12 +1420,17 @@ type Variable =
       (add rsp ,stack-size)
       ,@(complete-allocation continue2 stack-size)
       ,continue2
-      (mov (offset rsp ,(- (+ 4 (length env)))) rax) ;;Save address of the beginning of the bignum
+      (or rax ,type-bignum)
+      (mov (offset rsp ,(- (+ 4 (length env)))) rax) ;;Save tagged address of the beginning of the bignum
+      (xor rax ,type-bignum)
       
       ;;Store arguments in the registers used to pass arguments to the function
       (mov rsi (offset rsp ,(- (+ 4 (length env)))))
+      (xor rsi ,type-bignum)
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;Pointer to the begining of the string rep of the bignum
-  
+      (xor rdi ,type-string)
+      (add rdi 24) ;;Skip bookkeeping info
+      
       (add rsi 8) ;;Skip 8 bytes to leave space for the reference count
       
       ;;Setup the stack for the call
@@ -1401,23 +1443,21 @@ type Variable =
 
       ;;Set the reference count to 0.
       (mov rdi (offset rsp ,(- (+ 4 (length env)))))
+      (xor rdi ,type-bignum)
       (mov rbx 0)
       (mov (offset rdi 0) rbx)
 
-      ;;Free the memory used by the string rep of the bignum
-      (mov rdi (offset rsp ,(- (add1 (length env)))))
-      (mov rsi ,num-string-len)
-      (sub rsp ,stack-size)
-      (call addToFreeList)
-      (add rsp ,stack-size)
+      ;;Free the memory used by the string rep of the bignum by decrementing its reference count
+      (mov rax (offset rsp ,(- (add1 (length env)))))
+      ,@(decrement-ref-count continue3 stack-size #t)
+      ,continue3
       
       ;;Restore the registers that were used to pass arguments
       (mov rdi (offset rsp ,(- (+ 2 (length env))))) 
       (mov rsi (offset rsp ,(- (+ 3 (length env)))))
       
-      ;;Tag the result as a bignum
-      (mov rax (offset rsp ,(- (+ 4 (length env)))))
-      (or rax ,type-bignum))))
+      ;;return the bignum
+      (mov rax (offset rsp ,(- (+ 4 (length env))))))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Compile a logical operation;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1448,7 +1488,6 @@ type Variable =
       ;;Increment the reference count of both arguments. Decrement the ref count at the end, forcing garbage collection if necessary
       ,@(increment-ref-count continue1)
       ,continue1
-      (xor rax ,type-bignum);;Untag the pointer
       ;;Save the result of evaluating the first expression on the stack
       (mov (offset rsp ,(- (add1 (length env)))) rax)
 
@@ -1456,7 +1495,6 @@ type Variable =
       ,@assert-bignum
       ,@(increment-ref-count continue2)
       ,continue2
-      (xor rax ,type-bignum);;Untag the pointer
       (mov (offset rsp ,(- (+ 2 (length env)))) rax)
       
       ;;Save the stack
@@ -1468,19 +1506,13 @@ type Variable =
 
       ;;Call compBignum
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;Pass the first argument
-      (mov rsi rax) ;;Pass the second argument
+      (xor rdi ,type-bignum)
+      (mov rsi (offset rsp ,(- (+ 2 (length env))))) ;;Pass the second argument
+      (xor rsi ,type-bignum)
 
       (sub rsp ,stack-size)
       (call compBignum)
-
-      ;;Make sure the stack is as expected and then restore the stack
-      ;;stack pointer to where it was before the setup for the function
-      ;;call
-      (mov rbx r15) ;;Get the previous base of the stack
-      (sub rbx rsp) ;;Subtract it from the top of the stack. This should give us the stack size if everything went well
-      (cmp rbx ,stack-size)
-      (jne err)
-      (mov rsp r15)
+      (add rsp ,stack-size)
 
       ;;Restore the registers used to pass arguments
       (mov rdi (offset rsp ,(- (+ 3 (length env)))))
@@ -1490,11 +1522,9 @@ type Variable =
 
       ;;Decrement the reference count of the arguments
       (mov rax (offset rsp ,(- (add1 (length env)))))
-      (or rax ,type-bignum)
       ,@(decrement-ref-count continue3 stack-size #t)
       ,continue3
       (mov rax (offset rsp ,(- (+ 2 (length env)))))
-      (or rax ,type-bignum)
       ,@(decrement-ref-count continue4 stack-size #t)
       ,continue4
       
@@ -1527,7 +1557,6 @@ type Variable =
       ;;Increment the reference count of both arguments. Decrement the ref count at the end, forcing garbage collection if necessary
       ,@(increment-ref-count continue1)
       ,continue1
-      (xor rax ,type-bignum);;Untag the pointer
       ;;Save the result of evaluating the first expression on the stack
       (mov (offset rsp ,(- (add1 (length env)))) rax)
 
@@ -1535,7 +1564,6 @@ type Variable =
       ,@assert-bignum
       ,@(increment-ref-count continue2)
       ,continue2
-      (xor rax ,type-bignum);;Untag the pointer
       (mov (offset rsp ,(- (+ 2 (length env)))) rax)
       
       ;;Save the stack
@@ -1547,19 +1575,13 @@ type Variable =
 
       ;;Call compBignum
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;Pass the first argument
-      (mov rsi rax) ;;Pass the second argument
+      (xor rdi ,type-bignum)
+      (mov rsi (offset rsp ,(- (+ 2 (length env))))) ;;Pass the second argument
+      (xor rsi ,type-bignum)
 
       (sub rsp ,stack-size)
       (call compBignum)
-
-      ;;Make sure the stack is as expected and then restore the stack
-      ;;stack pointer to where it was before the setup for the function
-      ;;call
-      (mov rbx r15) ;;Get the previous base of the stack
-      (sub rbx rsp) ;;Subtract it from the top of the stack. This should give us the stack size if everything went well
-      (cmp rbx ,stack-size)
-      (jne err)
-      (mov rsp r15)
+      (sub rsp ,stack-size)
 
       ;;Restore the registers used to pass arguments
       (mov rdi (offset rsp ,(- (+ 3 (length env)))))
@@ -1569,11 +1591,9 @@ type Variable =
 
       ;;Decrement the reference count of the arguments
       (mov rax (offset rsp ,(- (add1 (length env)))))
-      (or rax ,type-bignum)
       ,@(decrement-ref-count continue3 stack-size #t)
       ,continue3
       (mov rax (offset rsp ,(- (+ 2 (length env)))))
-      (or rax ,type-bignum)
       ,@(decrement-ref-count continue4 stack-size #t)
       ,continue4
       
@@ -1606,7 +1626,6 @@ type Variable =
       ;;Increment the reference count of both arguments. Decrement the ref count at the end, forcing garbage collection if necessary
       ,@(increment-ref-count continue1)
       ,continue1
-      (xor rax ,type-bignum);;Untag the pointer
       ;;Save the result of evaluating the first expression on the stack
       (mov (offset rsp ,(- (add1 (length env)))) rax)
 
@@ -1614,7 +1633,6 @@ type Variable =
       ,@assert-bignum
       ,@(increment-ref-count continue2)
       ,continue2
-      (xor rax ,type-bignum);;Untag the pointer
       (mov (offset rsp ,(- (+ 2 (length env)))) rax)
       
       ;;Save the stack
@@ -1626,19 +1644,13 @@ type Variable =
 
       ;;Call compBignum
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;Pass the first argument
-      (mov rsi rax) ;;Pass the second argument
+      (xor rdi ,type-bignum)
+      (mov rsi (offset rsp ,(- (+ 2 (length env))))) ;;Pass the second argument
+      (xor rsi ,type-bignum)
 
       (sub rsp ,stack-size)
       (call compBignum)
-
-      ;;Make sure the stack is as expected and then restore the stack
-      ;;stack pointer to where it was before the setup for the function
-      ;;call
-      (mov rbx r15) ;;Get the previous base of the stack
-      (sub rbx rsp) ;;Subtract it from the top of the stack. This should give us the stack size if everything went well
-      (cmp rbx ,stack-size)
-      (jne err)
-      (mov rsp r15)
+      (add rsp ,stack-size)
 
       ;;Restore the registers used to pass arguments
       (mov rdi (offset rsp ,(- (+ 3 (length env)))))
@@ -1648,11 +1660,9 @@ type Variable =
 
       ;;Decrement the reference count of the arguments
       (mov rax (offset rsp ,(- (add1 (length env)))))
-      (or rax ,type-bignum)
       ,@(decrement-ref-count continue3 stack-size #t)
       ,continue3
       (mov rax (offset rsp ,(- (+ 2 (length env)))))
-      (or rax ,type-bignum)
       ,@(decrement-ref-count continue4 stack-size #t)
       ,continue4
       
@@ -1685,7 +1695,6 @@ type Variable =
       ;;Increment the reference count of both arguments. Decrement the ref count at the end, forcing garbage collection if necessary
       ,@(increment-ref-count continue1)
       ,continue1
-      (xor rax ,type-bignum);;Untag the pointer
       ;;Save the result of evaluating the first expression on the stack
       (mov (offset rsp ,(- (add1 (length env)))) rax)
 
@@ -1693,7 +1702,6 @@ type Variable =
       ,@assert-bignum
       ,@(increment-ref-count continue2)
       ,continue2
-      (xor rax ,type-bignum);;Untag the pointer
       (mov (offset rsp ,(- (+ 2 (length env)))) rax)
       
       ;;Save the stack
@@ -1705,19 +1713,14 @@ type Variable =
 
       ;;Call compBignum
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;Pass the first argument
-      (mov rsi rax) ;;Pass the second argument
-
+      (xor rdi ,type-bignum)
+      (mov rsi (offset rsp ,(- (add1 (length env))))) ;;Pass the second argument
+      (xor rsi ,type-bignum)
+      
       (sub rsp ,stack-size)
       (call compBignum)
 
-      ;;Make sure the stack is as expected and then restore the stack
-      ;;stack pointer to where it was before the setup for the function
-      ;;call
-      (mov rbx r15) ;;Get the previous base of the stack
-      (sub rbx rsp) ;;Subtract it from the top of the stack. This should give us the stack size if everything went well
-      (cmp rbx ,stack-size)
-      (jne err)
-      (mov rsp r15)
+      (add rsp ,stack-size)
 
       ;;Restore the registers used to pass arguments
       (mov rdi (offset rsp ,(- (+ 3 (length env)))))
@@ -1727,11 +1730,9 @@ type Variable =
 
       ;;Decrement the reference count of the arguments
       (mov rax (offset rsp ,(- (add1 (length env)))))
-      (or rax ,type-bignum)
       ,@(decrement-ref-count continue3 stack-size #t)
       ,continue3
       (mov rax (offset rsp ,(- (+ 2 (length env)))))
-      (or rax ,type-bignum)
       ,@(decrement-ref-count continue4 stack-size #t)
       ,continue4
       
@@ -1888,23 +1889,18 @@ type Variable =
       ;;thereby triggering garbage collection if necessary e.g For an argument expression whose result only has scope within this add expression
       ,@(increment-ref-count continue1)
       ,continue1
-      ;;Untag the address before placing it on the stack
-      (xor rax ,type-bignum)
-      (mov (offset rsp ,(- (add1 (length env)))) rax) ;;Save the result of evaluating the first expression on the stack to prevent clobbering
+      (mov (offset rsp ,(- (add1 (length env)))) rax) ;;Save the result of evaluating the first expression on the stack
 
       ,@c2
       ,@assert-bignum
       ,@(increment-ref-count continue2)
       ,continue2
-      ;;Untag the address before placing it on the stack
-      (xor rax ,type-bignum)
-      (mov (offset rsp ,(- (+ 2 (length env)))) rax) ;;Save the result of evaluating the second expression on the stack to prevent loss when external functions are called
+      (mov (offset rsp ,(- (+ 2 (length env)))) rax) ;;Save the result of evaluating the second expression on the stack
 
       ;;Save the registers used to pass in arguments
       (mov (offset rsp ,(- (+ 3 (length env)))) rdi) 
       (mov (offset rsp ,(- (+ 4 (length env)))) rsi)
       (mov (offset rsp ,(- (+ 5 (length env)))) rdx)
-
 
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Create the new GMP struct;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       ;;Allocate 24 bytes for the new GMP struct
@@ -1915,12 +1911,13 @@ type Variable =
       ,@(complete-allocation continue5 stack-size)
       ,continue5
       (mov rdi rax)
-      (mov (offset rsp ,(- (+ 6 (length env)))) rdi) ;;Save address to new GMP struct
-      
+      (or rdi ,type-bignum) ;;Any address placed on the stack should be tagged.
+      (mov (offset rsp ,(- (+ 6 (length env)))) rdi) ;;Save address to new GMP struct.
+      (xor rdi ,type-bignum)
+
       ;;Set ref count of bignum to 0
       (mov rbx 0)
       (mov (offset rdi 0) rbx)
-      (add rdi 8)
       
       ;;Setup for the gmp function calls required to add two bignums.
       ;;No need to do anything with rdi since it already contains the address of
@@ -1932,10 +1929,13 @@ type Variable =
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Perform the addition;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       ;;add the two bignums and save the result in the newly initialized struct
       (add rsp ,stack-size) ;;Restore the stack to access the arguments for calling the addition function
-      (mov rdi (offset rsp ,(- (+ 6 (length env))))) ;;Untagged pointer to the new GMP struct
+      (mov rdi (offset rsp ,(- (+ 6 (length env))))) ;;tagged pointer to the new GMP struct
+      (xor rdi ,type-bignum) ;;untag the pointer
       (add rdi 8) ;;Skip ref count
-      (mov rsi (offset rsp ,(- (add1 (length env))))) ;;Untagged pointer to the first bignum
-      (mov rdx (offset rsp ,(- (+ 2 (length env))))) ;;Untagged pointer to the second bignum
+      (mov rsi (offset rsp ,(- (add1 (length env))))) ;;tagged pointer to the first bignum
+      (xor rsi ,type-bignum)
+      (mov rdx (offset rsp ,(- (+ 2 (length env))))) ;;tagged pointer to the second bignum
+      (xor rdx ,type-bignum)
 
       (sub rsp ,stack-size) 
       (call my_mpz_add) ;;First arg is the address of the struct where the result should be placed, second arg is the first bignum, third arg is the second bignum
@@ -1950,17 +1950,14 @@ type Variable =
 
       ;;Decrement the reference counts of the arguments to add
       (mov rax (offset rsp ,(- (add1 (length env)))))
-      (or rax ,type-bignum) ;;Because the argument was untagged before placing it on the stack
       ,@(decrement-ref-count continue3 stack-size #t)
       ,continue3
       (mov rax (offset rsp ,(- (+ 2 (length env)))))
-      (or rax ,type-bignum) ;;Because the argument was untagged before placing it on the stack
       ,@(decrement-ref-count continue4 stack-size #t)
       ,continue4
       
       ;;Return a tagged pointer to the result on the heap
-      (mov rax (offset rsp ,(- (+ 6 (length env)))))
-      (or rax ,type-bignum))))
+      (mov rax (offset rsp ,(- (+ 6 (length env))))))))
 
 ;;Compile the subtraction of two bignums
 ;;Expr Expr CEnv-> ASM
@@ -1979,23 +1976,18 @@ type Variable =
       ;;thereby triggering garbage collection if necessary e.g For an argument expression whose result only has scope within this add expression
       ,@(increment-ref-count continue1)
       ,continue1
-      ;;Untag the address before placing it on the stack
-      (xor rax ,type-bignum)
       (mov (offset rsp ,(- (add1 (length env)))) rax) ;;Save the result of evaluating the first expression on the stack to prevent clobbering
 
       ,@c2
       ,@assert-bignum
       ,@(increment-ref-count continue2)
       ,continue2
-      ;;Untag the address before placing it on the stack
-      (xor rax ,type-bignum)
       (mov (offset rsp ,(- (+ 2 (length env)))) rax) ;;Save the result of evaluating the second expression on the stack to prevent loss when external functions are called
 
       ;;Save the registers used to pass in arguments
       (mov (offset rsp ,(- (+ 3 (length env)))) rdi) 
       (mov (offset rsp ,(- (+ 4 (length env)))) rsi)
       (mov (offset rsp ,(- (+ 5 (length env)))) rdx)
-
 
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Create the new GMP struct;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       ;;Allocate 24 bytes for the new GMP struct
@@ -2006,14 +1998,15 @@ type Variable =
       ,@(complete-allocation continue5 stack-size)
       ,continue5
       (mov rdi rax)
-      (mov (offset rsp ,(- (+ 6 (length env)))) rdi) ;;Save address to new GMP struct
-      
+      (or rdi ,type-bignum) ;;Any address placed on the stack should be tagged.
+      (mov (offset rsp ,(- (+ 6 (length env)))) rdi) ;;Save address to new GMP struct.
+      (xor rdi ,type-bignum)
+
       ;;Set ref count of bignum to 0
       (mov rbx 0)
       (mov (offset rdi 0) rbx)
-      (add rdi 8)
       
-      ;;Setup for the gmp function calls required to add two bignums.
+      ;;Setup for the gmp function calls required to sub two bignums.
       ;;No need to do anything with rdi since it already contains the address of
       ;;the next free position on the heap
       (sub rsp ,stack-size);;Make rsp point to the top of the stack
@@ -2021,12 +2014,15 @@ type Variable =
       (call my_mpz_init)
 
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Perform the addition;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-      ;;add the two bignums and save the result in the newly initialized struct
+      ;;subtract the two bignums and save the result in the newly initialized struct
       (add rsp ,stack-size) ;;Restore the stack to access the arguments for calling the addition function
-      (mov rdi (offset rsp ,(- (+ 6 (length env))))) ;;Untagged pointer to the new GMP struct
+      (mov rdi (offset rsp ,(- (+ 6 (length env))))) ;;tagged pointer to the new GMP struct
+      (xor rdi ,type-bignum) ;;untag the pointer
       (add rdi 8) ;;Skip ref count
-      (mov rsi (offset rsp ,(- (add1 (length env))))) ;;Untagged pointer to the first bignum
-      (mov rdx (offset rsp ,(- (+ 2 (length env))))) ;;Untagged pointer to the second bignum
+      (mov rsi (offset rsp ,(- (add1 (length env))))) ;;tagged pointer to the first bignum
+      (xor rsi ,type-bignum)
+      (mov rdx (offset rsp ,(- (+ 2 (length env))))) ;;tagged pointer to the second bignum
+      (xor rdx ,type-bignum)
 
       (sub rsp ,stack-size) 
       (call my_mpz_sub) ;;First arg is the address of the struct where the result should be placed, second arg is the first bignum, third arg is the second bignum
@@ -2041,17 +2037,14 @@ type Variable =
 
       ;;Decrement the reference counts of the arguments to add
       (mov rax (offset rsp ,(- (add1 (length env)))))
-      (or rax ,type-bignum) ;;Because the argument was untagged before placing it on the stack
       ,@(decrement-ref-count continue3 stack-size #t)
       ,continue3
       (mov rax (offset rsp ,(- (+ 2 (length env)))))
-      (or rax ,type-bignum) ;;Because the argument was untagged before placing it on the stack
       ,@(decrement-ref-count continue4 stack-size #t)
       ,continue4
       
       ;;Return a tagged pointer to the result on the heap
-      (mov rax (offset rsp ,(- (+ 6 (length env)))))
-      (or rax ,type-bignum))))
+      (mov rax (offset rsp ,(- (+ 6 (length env))))))))
   
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Assertions;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;A variable that hods ASM for confirming that the value in rax is a bignum
@@ -2334,6 +2327,19 @@ type Variable =
     [`(if ,a ,b ,c) #t]
     [_ #f]))
 
+;;Determine if the expression is a match clause
+;;Expr -> boolean
+(define (match-clause? expr)
+  (match expr
+    [`((? pattern? p) bs..1) #t]
+    [_ #f]))
+
+;;Determine if the expression is a pattern
+;;Expr -> boolean
+(define (pattern? expr)
+  (value? expr))
+
+    
 ;;Determine if the expression is a value
 ;;Expr -> boolean
 (define (value? expr)

@@ -17,6 +17,7 @@
 #define type_list  0b011
 #define type_pair 0b100
 #define type_range 0b101
+#define type_string 0b110
 
 #define type_true ((0b000 << result_shift))
 #define type_false ((0b001 << result_shift))

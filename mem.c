@@ -137,6 +137,9 @@ int64_t allocateChunk(short size) {
 	//Since malloc gives 8 byte alligned addresses, tagging can be used to indicate when a chunk is returned and when 
 	// a map is returned.
 	assert((chunk % 8) == 0);
+	//zero out the allocated chunk
+	memset((void *)chunk, 0,size);
+
 	return (chunk | type_chunk);
 }
 
@@ -242,6 +245,8 @@ void updateAddressOnHeap(int64_t start) {
 	if(validateAddr(start & clear_tag) == true) { //Make sure the address is a valid address on the heap
 		switch(start & result_type_mask) {
 			case type_bignum:
+				return;
+			case type_string:
 				return;
 			case type_pair:
 				{

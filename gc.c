@@ -80,6 +80,13 @@ void garbageCollect(int64_t ref) {
 			
                         }
                         break;
+		case type_string:
+			{
+			int64_t* ref_p = (int64_t*) (ref ^ type_string);
+			int64_t len_in_bytes = *(ref_p + 1);
+			addToFreeList((int64_t)ref_p, len_in_bytes);
+			}
+			break;
                 default:
                         gcError("Attempt to garbage collect a value that is not a chunk");
         }
@@ -103,6 +110,9 @@ void decrementRefCount(int64_t ref) {
                 case type_box:
                         type = type_box;
                         break;
+		case type_string:
+			type = type_string;
+			break;
                 default:
                         break;
 

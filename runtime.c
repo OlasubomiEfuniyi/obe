@@ -4,6 +4,7 @@
 
 int64_t entry(void* heap_start_addr, int64_t h_size);
 void printResult(int64_t value);
+void printString(int64_t value);
 void printBignum(int64_t value);
 void printList(int64_t value);
 void printPair(int64_t value);
@@ -196,6 +197,9 @@ void printValue(int64_t value) {
 		//printf("I am a bignum\n");			
 		printBignum(value);	
 		break;
+	case type_string:
+		printString(value);
+		break;
 	case type_list:
 		//printf("I am a list\n");
 		printf("(");
@@ -248,6 +252,12 @@ void printValue(int64_t value) {
 		//error();
 	}
 
+}
+
+/* Print a string */
+void printString(int64_t value) {
+	char* str = (char*)((value ^ type_string) + 24);
+	printf("%s", str);
 }
 
 /* Print a list of values */
