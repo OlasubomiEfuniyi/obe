@@ -38,7 +38,8 @@
 ;;ASM -> value
 (define (execute prog)
   (let* ((f.s (make-temporary-file "nasm~a.s"))
-         (f.run (path-replace-extension f.s ".run")))
+         (f.run (path-replace-extension f.s ".run"))
+         (heap-size "1000000"))
     ;;write the assembly code into the temporary file
     (with-output-to-file f.s
       #:exists 'replace
@@ -50,7 +51,7 @@
     ;;read to read in the output as input
     (let ((res (with-output-to-string
                  (λ ()
-                   (system (path->string f.run))
+                   (system (string-append (path->string f.run) " " heap-size))
                    (delete-file f.run)))))
       (with-input-from-string
           res

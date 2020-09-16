@@ -25,6 +25,7 @@ struct Chunk* free_list = NULL;
 extern bool gc_info;
 int64_t bytes_allocated = 0;
 int64_t* heap = NULL;
+int64_t heap_size = 0;
 int64_t* map = NULL;
 int64_t next_free_pos_in_heap = 0;
 int64_t end_address = -1;
@@ -33,7 +34,8 @@ int64_t end_address = -1;
 short last_request = -1; 
 
 /* This function creates the heap and returns a pointer to it */
-int64_t* init_heap() {
+int64_t* init_heap(int64_t h_size) {
+	heap_size = h_size;
 	heap = (int64_t*) malloc(heap_size);
 	if(heap == NULL) {
 		memError("Could not malloc a heap");

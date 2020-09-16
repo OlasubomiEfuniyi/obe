@@ -655,7 +655,6 @@ type Variable =
       ;;within the body of the for loop.
       (mov r15 1)
       (mov (offset rdi 0) r15)
-      (add rdi 8)
 
       ;;Initialize the GMP struct where the result of increment will be placed
       (sub rsp ,stack-size)
@@ -1201,7 +1200,6 @@ type Variable =
       ;;Set the reference count of the new bignum to be made to 0
       (mov rbx 0)
       (mov (offset rdi 0) rbx)
-      (add rdi 8)
 
       ;;Initialize the GMP struct that will hold the decremented value
       (sub rsp ,stack-size)
@@ -1566,8 +1564,6 @@ type Variable =
       ,continue2
       (mov (offset rsp ,(- (+ 2 (length env)))) rax)
       
-      ;;Save the stack
-      (mov r15 rsp) ;;The function being called will take care of setting and restoring rbp
 
       ;;Save the registers used to pass in arguments
       (mov (offset rsp ,(- (+ 3 (length env)))) rdi)
@@ -1581,7 +1577,7 @@ type Variable =
 
       (sub rsp ,stack-size)
       (call compBignum)
-      (sub rsp ,stack-size)
+      (add rsp ,stack-size)
 
       ;;Restore the registers used to pass arguments
       (mov rdi (offset rsp ,(- (+ 3 (length env)))))
@@ -1704,8 +1700,6 @@ type Variable =
       ,continue2
       (mov (offset rsp ,(- (+ 2 (length env)))) rax)
       
-      ;;Save the stack
-      (mov r15 rsp) ;;The function being called will take care of setting and restoring rbp
 
       ;;Save the registers used to pass in arguments
       (mov (offset rsp ,(- (+ 3 (length env)))) rdi)
@@ -1714,7 +1708,7 @@ type Variable =
       ;;Call compBignum
       (mov rdi (offset rsp ,(- (add1 (length env))))) ;;Pass the first argument
       (xor rdi ,type-bignum)
-      (mov rsi (offset rsp ,(- (add1 (length env))))) ;;Pass the second argument
+      (mov rsi (offset rsp ,(- (+ 2 (length env))))) ;;Pass the second argument
       (xor rsi ,type-bignum)
       
       (sub rsp ,stack-size)

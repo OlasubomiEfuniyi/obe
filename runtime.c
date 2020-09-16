@@ -20,13 +20,21 @@ The entry function is linked with this RTS
 We use the GMP Library to support arbitrary precision integers */
 int main(int argc, char** argv) {
 	int64_t* heap = NULL;
-	heap = init_heap();
+	int64_t heap_size = 0;
 	
-	//Check if printing gc info is desired
-	if(argc > 1 && (strcmp(*(argv + 1), "gc") == 0)) {
-		gc_info = true;
+	if(argc == 1) { //No argument was provided. At least the heap size must be provided
+		runtimeSystemError();
+	} else if(argc == 2) { //The only arg is interpreted as the heap size
+		heap_size = atoi(argv[1]);
+	} else { //The first arg is the heap size, the second is the optional gc argument. Others are ignored
+		heap_size = atoi(argv[1]);	
+		//Check if printing gc info is desired
+		if((strcmp(*(argv + 2), "gc") == 0)) {
+			gc_info = true;
+		}
 	}
-
+	
+	heap = init_heap(heap_size);
 	/* Entry may either return a 64 bit value via a register or a pointer to a result */
 	int64_t  value = entry(heap, heap_size);
 	
@@ -41,9 +49,15 @@ int main(int argc, char** argv) {
 	return 0;
 }
 
+/* Given an address to the beginning of a bignum chunk, this function
+initializes a GMP struct in the last 16 bytes, skipping the ref count */
 void my_mpz_init(int64_t x) { 
-	mpz_init(*((mpz_t*) x));
+	mpz_init(*((mpz_t*) ((int64_t*)x + 1)));
 }
+
+/* Given the 16 bytes for a GMP struct where the result should go,
+the GMP struct of the first operand and the GMP struct of the second operand,
+this function adds op2 to op1 and saves the result in rop */
 
 void my_mpz_add(int64_t rop, int64_t op1, int64_t op2) {
 	assert(rop % 8 == 0);
@@ -68,6 +82,10 @@ void my_mpz_add(int64_t rop, int64_t op1, int64_t op2) {
 void increment(int64_t arg, int64_t res) {
 	mpz_add_ui(*((mpz_t*)res), *((mpz_t*)(((int64_t *) arg) + 1)), 1);
 }
+
+/* Given the 16 bytes for a GMP struct where the result should go,
+the GMP struct of the first operand and the GMP struct of the second operand,
+this function subtracts op2 from op1 and saves the result in rop */
 
 void my_mpz_sub(int64_t rop, int64_t op1, int64_t op2) {
 	assert(rop % 8 == 0);
@@ -207,7 +225,6 @@ void printValue(int64_t value) {
 		printf(")");
 		break;
 	case type_pair:
-		printf("I am a pair\n");
 		printf("(");
 		printPair(value);
 		printf(")");
@@ -384,6 +401,7 @@ int nomem() {
 
 /* Signal an error in the runtime system */
 void runtimeSystemError(void) {
+	fprintf(stderr, "Runtime System failed\n");	
 	exit(1);
 }
 
