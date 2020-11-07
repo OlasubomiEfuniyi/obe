@@ -1391,7 +1391,7 @@ type Variable =
       (mov rbx 1)
       (mov (offset rdi 0) rbx)
       ;;Place the length of the string on the heap. This length represents the number of
-      ;;bytes taken up by the string on the heap
+      ;;bytes taken up by the string on the heap i.e including the null characters used for padding
       (mov rbx ,num-string-len)
       (mov (offset rdi 1) rbx)
       ;;Place the actual length of the string on the heap.

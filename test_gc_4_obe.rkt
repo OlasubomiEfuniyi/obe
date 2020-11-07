@@ -1,7 +1,0 @@
-(let ((x 1) (y 2) (z 3) (a 4) (b 500000000) (c (cons #t '())))
-	(println (>= x y))
-	(println (<= y x))
-	(println (= x a))
-	(println (= a a))
-	(println (head c))
-	z)

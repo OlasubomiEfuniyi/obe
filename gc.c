@@ -84,7 +84,7 @@ void garbageCollect(int64_t ref) {
 			{
 			int64_t* ref_p = (int64_t*) (ref ^ type_string);
 			int64_t len_in_bytes = *(ref_p + 1);
-			addToFreeList((int64_t)ref_p, len_in_bytes);
+			addToFreeList((int64_t)ref_p, 24 + len_in_bytes);
 			}
 			break;
                 default:
